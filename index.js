@@ -1,3 +1,3 @@
-const { AvlTree } = require("./lib");
+const { AvlTree } = require('./lib');
 
 module.exports = AvlTree;

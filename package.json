@@ -3,16 +3,23 @@
   "version": "1.0.2",
   "description": "A fast implementation of AVL tree in a Node.js environment.",
   "main": "index.js",
-  "types": "index.d.ts",
+  "types": "lib/index.d.ts",
+  "type": "commonjs",
   "scripts": {
     "build": "napi build --release ./lib",
-    "clean": "napi clean"
+    "lint": "eslint . --fix",
+    "format": "prettier --write ."
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/psht13/avl-tree.git"
   },
-  "keywords": ["avl tree js", "algorithms", "binary trees", "self balancing tree"],
+  "keywords": [
+    "avl tree js",
+    "algorithms",
+    "binary trees",
+    "self balancing tree"
+  ],
   "author": "Pavlo Yurchenko <pashtet.gm@gmail.com>",
   "license": "MIT",
   "bugs": {
@@ -20,6 +27,9 @@
   },
   "homepage": "https://github.com/psht13/avl-tree#readme",
   "devDependencies": {
-    "@napi-rs/cli": "^2.18.4"
+    "@eslint/js": "^9.19.0",
+    "@napi-rs/cli": "^2.18.4",
+    "eslint": "^9.19.0",
+    "globals": "^15.14.0"
   }
 }

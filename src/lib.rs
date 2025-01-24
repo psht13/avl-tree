@@ -6,7 +6,7 @@ pub struct AVLTree {
     root: Option<Box<Node>>,
 }
 
-#[napi]
+#[napi] 
 impl AVLTree {
     #[napi(constructor)]
     pub fn new() -> Self {
