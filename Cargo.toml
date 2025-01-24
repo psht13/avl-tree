@@ -1,0 +1,11 @@
+[package]
+name = "avl-tree-rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+napi = { version = "2.16.13", features = ["napi4"] }
+napi-derive = "2.16.13"
+
+[lib]
+crate-type = ["cdylib"]

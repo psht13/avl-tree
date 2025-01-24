@@ -1,0 +1,25 @@
+{
+  "name": "psht13@avl-tree",
+  "version": "1.0.1",
+  "description": "Fast implementation of avl-trees in Node.js environment.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "scripts": {
+    "build": "napi build --release ./lib",
+    "clean": "napi clean"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/psht13/avl-tree.git"
+  },
+  "keywords": ["avl tree js", "algorithms", "binary trees", "self balancing tree"],
+  "author": "Pavlo Yurchenko <pashtet.gm@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/psht13/avl-tree/issues"
+  },
+  "homepage": "https://github.com/psht13/avl-tree#readme",
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.4"
+  }
+}
