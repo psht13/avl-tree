@@ -1,7 +1,7 @@
 {
   "name": "psht13@avl-tree",
-  "version": "1.0.1",
-  "description": "Fast implementation of avl-trees in Node.js environment.",
+  "version": "1.0.2",
+  "description": "A fast implementation of AVL tree in a Node.js environment.",
   "main": "index.js",
   "types": "index.d.ts",
   "scripts": {
