@@ -3,8 +3,7 @@
   "version": "1.0.2",
   "description": "A fast implementation of AVL tree in a Node.js environment.",
   "main": "index.js",
-  "types": "lib/index.d.ts",
-  "type": "commonjs",
+  "types": "index.d.ts",
   "scripts": {
     "build": "napi build --release ./lib",
     "lint": "eslint . --fix",
