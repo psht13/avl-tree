@@ -29,7 +29,7 @@ export declare class AvlTree {
    *
    * Accepts an array of key/value pairs.
    */
-  bulkInsert(nodes: Array<KvPair>): void;
+  bulkInsert(nodes: Array<KVPair>): void;
   /**
    * Searches for a node by its key.
    *

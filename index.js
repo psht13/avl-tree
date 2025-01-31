@@ -1,3 +1,1 @@
-const { AvlTree } = require('./dist/index.node');
-
-module.exports = AvlTree;
+module.exports = require('./dist/index.node');

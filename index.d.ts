@@ -1,3 +1,3 @@
-import { AvlTree } from './dist/index.d';
+import { AvlTree } from './dist/index';
 
 export default AvlTree;
