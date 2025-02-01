@@ -1,7 +1,7 @@
 {
   "name": "avl-tree-rust",
-  "version": "1.0.7",
-  "description": "A fast implementation of AVL tree in a Node.js environment.",
+  "version": "1.0.8",
+  "description": "High-performance native AVL tree library for Node.js.",
   "main": "index.js",
   "types": "index.d.ts",
   "scripts": {
