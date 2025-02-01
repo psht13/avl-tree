@@ -11,11 +11,11 @@
  */
 export interface NodeEntry {
   /** The key for the node, as a number or string. */
-  key: number | string;
+  key: number | string
   /** The value for the node, as a number or string. */
-  value: number | string;
+  value: number | string
 }
-export type AVLTree = AvlTree;
+export type AVLTree = AvlTree
 /**
  * A Node.js–exposed AVL tree that supports number or string keys and values.
  *
@@ -30,7 +30,7 @@ export declare class AvlTree {
    *
    * A new instance of `AVLTree` with no nodes.
    */
-  constructor();
+  constructor()
   /**
    * Inserts a single node with the specified key and value into the AVL tree.
    *
@@ -48,7 +48,7 @@ export declare class AvlTree {
    * tree.insert(42, "The answer");
    * ```
    */
-  insert(key: number | string, value: number | string): void;
+  insert(key: number | string, value: number | string): void
   /**
    * Inserts multiple nodes at once into the AVL tree.
    *
@@ -69,7 +69,7 @@ export declare class AvlTree {
    * ]);
    * ```
    */
-  bulkInsert(nodes: Array<NodeEntry>): void;
+  bulkInsert(nodes: Array<NodeEntry>): void
   /**
    * Searches for a node in the AVL tree by its key.
    *
@@ -95,7 +95,7 @@ export declare class AvlTree {
    * }
    * ```
    */
-  search(key: number | string): number | string | null;
+  search(key: number | string): number | string | null
   /**
    * Returns a string representing all nodes in the AVL tree using in-order traversal.
    *
@@ -113,5 +113,5 @@ export declare class AvlTree {
    * // Might output: "{ key: 5, value: 'five' }, { key: 10, value: 'ten' }, { key: 15, value: 'fifteen' }"
    * ```
    */
-  dump(): string;
+  dump(): string
 }

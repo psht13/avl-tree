@@ -1,14 +1,13 @@
 {
   "name": "avl-tree-rust",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "High-performance native AVL tree library for Node.js.",
   "main": "index.js",
   "types": "index.d.ts",
   "scripts": {
     "build": "napi build --release ./dist",
     "lint": "eslint . --fix",
-    "format": "prettier --write .",
-    "prepare": "husky"
+    "format": "prettier --write ."
   },
   "repository": {
     "type": "git",
@@ -30,7 +29,6 @@
     "@eslint/js": "^9.19.0",
     "@napi-rs/cli": "^2.18.4",
     "eslint": "^9.19.0",
-    "globals": "^15.14.0",
-    "husky": "^9.1.7"
+    "globals": "^15.14.0"
   }
 }
