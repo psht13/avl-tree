@@ -6,9 +6,9 @@ use napi::bindgen_prelude::Either;
 use std::cmp::Ordering;
 
 /// A Node.js–exposed AVL tree that supports number or string keys and values.
-/// 
+///
 /// The AVL tree is a self-balancing binary search tree that supports insertion,
-/// bulk insertion, search by key, and dumping the tree contents (in-order traversal).
+/// bulk insertion, search by key, removal by key, and dumping the tree contents (in-order traversal).
 #[napi]
 pub struct AVLTree {
   root: Option<Box<Node>>,
@@ -18,9 +18,12 @@ pub struct AVLTree {
 impl AVLTree {
   /// Creates a new, empty AVL tree.
   ///
+  ///
   /// # Returns
   ///
-  /// A new instance of `AVLTree` with no nodes.
+  /// A new instance of AVLTree with no nodes.
+  ///
+  ///
   #[napi(constructor)]
   pub fn new() -> Self {
     Self { root: None }
@@ -28,19 +31,25 @@ impl AVLTree {
 
   /// Inserts a single node with the specified key and value into the AVL tree.
   ///
+  ///
   /// If a node with the same key already exists, its value is updated to the provided value.
+  ///
   ///
   /// # Parameters
   ///
-  /// - `key`: A number or a string that represents the key.
-  /// - `value`: A number or a string that represents the value.
+  /// - key: A number or a string that represents the key.
+  /// - value: A number or a string that represents the value.
+  ///
   ///
   /// # Example (TypeScript)
+  ///
   ///
   /// ```ts
   /// const tree = new AvlTree();
   /// tree.insert(42, "The answer");
   /// ```
+  ///
+  ///
   #[napi]
   pub fn insert(&mut self, key: Either<i32, String>, value: Either<i32, String>) {
     // Convert the Either values into our internal KeyValue type.
@@ -51,15 +60,19 @@ impl AVLTree {
 
   /// Inserts multiple nodes at once into the AVL tree.
   ///
-  /// Accepts an array of objects where each object has a `key` and `value` property.
+  ///
+  /// Accepts an array of objects where each object has a key and value property.
   /// This is useful for bulk insertion.
+  ///
   ///
   /// # Parameters
   ///
-  /// - `nodes`: An array of key/value pairs, where each pair is represented by an object
-  ///            with properties `key` and `value`. Each key and value can be a number or a string.
+  /// - nodes: An array of key/value pairs, where each pair is represented by an object
+  ///            with properties key and value. Each key and value can be a number or a string.
+  ///
   ///
   /// # Example (TypeScript)
+  ///
   ///
   /// ```ts
   /// tree.bulkInsert([
@@ -67,6 +80,8 @@ impl AVLTree {
   ///   { key: 20, value: "twenty" }
   /// ]);
   /// ```
+  ///
+  ///
   #[napi]
   pub fn bulk_insert(&mut self, nodes: Vec<NodeEntry>) {
     for node in nodes {
@@ -76,18 +91,23 @@ impl AVLTree {
 
   /// Searches for a node in the AVL tree by its key.
   ///
+  ///
   /// If a node with the specified key exists, returns its associated value.
-  /// Otherwise, returns `null`.
+  /// Otherwise, returns null.
+  ///
   ///
   /// # Parameters
   ///
-  /// - `key`: The key to search for (number or string).
+  /// - key: The key to search for (number or string).
+  ///
   ///
   /// # Returns
   ///
-  /// The value associated with the key if found, or `null` if no such node exists.
+  /// The value associated with the key if found, or null if no such node exists.
+  ///
   ///
   /// # Example (TypeScript)
+  ///
   ///
   /// ```ts
   /// const value = tree.search("myKey");
@@ -97,6 +117,8 @@ impl AVLTree {
   ///   console.log("Not found");
   /// }
   /// ```
+  ///
+  ///
   #[napi]
   pub fn search(&self, key: Either<i32, String>) -> Option<Either<i32, String>> {
     let key: KeyValue = key.into();
@@ -108,24 +130,71 @@ impl AVLTree {
 
   /// Returns a string representing all nodes in the AVL tree using in-order traversal.
   ///
+  ///
   /// The returned string lists the nodes in sorted order by key. Each node is represented
   /// by its key and value.
+  ///
   ///
   /// # Returns
   ///
   /// A string that contains the representation of all nodes in the tree.
   ///
+  ///
   /// # Example (TypeScript)
+  ///
   ///
   /// ```ts
   /// console.log(tree.dump());
   /// // Might output: "{ key: 5, value: 'five' }, { key: 10, value: 'ten' }, { key: 15, value: 'fifteen' }"
   /// ```
+  ///
+  ///
   #[napi]
   pub fn dump(&self) -> String {
     let mut entries = Vec::new();
     Self::traverse_in_order(&self.root, &mut entries);
     entries.join(", ")
+  }
+
+  /// Removes a node from the AVL tree by its key.
+  ///
+  ///
+  /// If a node with the specified key exists, it is removed from the tree and its associated
+  /// value is returned. If no such node exists, null is returned.
+  ///
+  ///
+  /// # Parameters
+  ///
+  /// - key: A number or a string that represents the key of the node to be removed.
+  ///
+  ///
+  /// # Returns
+  ///
+  /// The value associated with the removed node if removal was successful, or null otherwise.
+  ///
+  ///
+  /// # Example (TypeScript)
+  ///
+  ///
+  /// ```ts
+  /// const removedValue = tree.remove(42);
+  /// if (removedValue !== null) {
+  ///   console.log("Removed:", removedValue);
+  /// } else {
+  ///   console.log("Key not found");
+  /// }
+  /// ```
+  ///
+  ///
+  #[napi]
+  pub fn remove(&mut self, key: Either<i32, String>) -> Option<Either<i32, String>> {
+    let key: KeyValue = key.into();
+    let (new_root, removed) = Self::remove_node(self.root.take(), &key);
+    self.root = new_root;
+    removed.map(|val| match val {
+      KeyValue::Number(n) => Either::A(n),
+      KeyValue::String(s) => Either::B(s),
+    })
   }
 
   // --- Internal AVL tree functions ---
@@ -217,6 +286,62 @@ impl AVLTree {
       Self::traverse_in_order(&n.right, entries);
     }
   }
+
+  // Recursive removal function.
+  // Returns a tuple containing the new subtree root and an Option with the removed value.
+  fn remove_node(
+    node: Option<Box<Node>>,
+    key: &KeyValue,
+  ) -> (Option<Box<Node>>, Option<KeyValue>) {
+    if let Some(mut n) = node {
+      let removed = match key.cmp(&n.key) {
+        Ordering::Less => {
+          let (new_left, rem) = Self::remove_node(n.left.take(), key);
+          n.left = new_left;
+          rem
+        }
+        Ordering::Greater => {
+          let (new_right, rem) = Self::remove_node(n.right.take(), key);
+          n.right = new_right;
+          rem
+        }
+        Ordering::Equal => {
+          let removed_value = Some(n.value.clone());
+          // Node with only one child or no child.
+          if n.left.is_none() {
+            return (n.right.take(), removed_value);
+          } else if n.right.is_none() {
+            return (n.left.take(), removed_value);
+          } else {
+            // Node with two children:
+            // Get the in-order successor (smallest in the right subtree).
+            let (new_right, min_node) = Self::remove_min(n.right.take().unwrap());
+            n.right = new_right;
+            n.key = min_node.key;
+            n.value = min_node.value;
+            removed_value
+          }
+        }
+      };
+      n.update_height();
+      (Some(Self::balance(n)), removed)
+    } else {
+      (None, None)
+    }
+  }
+
+  // Helper function to remove the smallest node in the subtree.
+  // Returns a tuple of the new subtree root and the removed minimum node.
+  fn remove_min(mut node: Box<Node>) -> (Option<Box<Node>>, Box<Node>) {
+    if node.left.is_none() {
+      return (node.right.take(), node);
+    } else {
+      let (new_left, min_node) = Self::remove_min(node.left.take().unwrap());
+      node.left = new_left;
+      node.update_height();
+      (Some(Self::balance(node)), min_node)
+    }
+  }
 }
 
 /// A single node in the AVL tree.
@@ -231,10 +356,13 @@ struct Node {
 impl Node {
   /// Creates a new node with the specified key and value.
   ///
+  ///
   /// # Parameters
   ///
-  /// - `key`: The key for the node.
-  /// - `value`: The value for the node.
+  /// - key: The key for the node.
+  /// - value: The value for the node.
+  ///
+  ///
   fn new(key: KeyValue, value: KeyValue) -> Self {
     Self {
       key,
@@ -245,24 +373,30 @@ impl Node {
     }
   }
 
-  /// Returns the height of a node, or 0 if the node is `None`.
+  /// Returns the height of a node, or 0 if the node is None.
+  ///
+  ///
   fn height(node: &Option<Box<Node>>) -> i32 {
     node.as_ref().map_or(0, |n| n.height)
   }
 
   /// Updates this node's height based on the heights of its children.
+  ///
+  ///
   fn update_height(&mut self) {
     self.height = 1 + i32::max(Self::height(&self.left), Self::height(&self.right));
   }
 
   /// Computes the balance factor of the node (left height minus right height).
+  ///
+  ///
   fn balance_factor(&self) -> i32 {
     Self::height(&self.left) - Self::height(&self.right)
   }
 }
 
 /// The internal representation for keys and values in our tree.
-/// 
+///
 /// Both keys and values can be either a number or a string.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyValue {
@@ -301,7 +435,7 @@ impl From<Either<i32, String>> for KeyValue {
 
 /// A helper struct to represent a key/value pair for bulk insertion.
 ///
-/// This struct is annotated with `#[napi(object)]` so that you can pass an array
+/// This struct is annotated with #[napi(object)] so that you can pass an array
 /// of such objects from Node.js.
 #[napi(object)]
 pub struct NodeEntry {

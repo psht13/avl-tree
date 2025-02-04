@@ -6,7 +6,7 @@
 /**
  * A helper struct to represent a key/value pair for bulk insertion.
  *
- * This struct is annotated with `#[napi(object)]` so that you can pass an array
+ * This struct is annotated with #[napi(object)] so that you can pass an array
  * of such objects from Node.js.
  */
 export interface NodeEntry {
@@ -20,47 +20,60 @@ export type AVLTree = AvlTree
  * A Node.js–exposed AVL tree that supports number or string keys and values.
  *
  * The AVL tree is a self-balancing binary search tree that supports insertion,
- * bulk insertion, search by key, and dumping the tree contents (in-order traversal).
+ * bulk insertion, search by key, removal by key, and dumping the tree contents (in-order traversal).
  */
 export declare class AvlTree {
   /**
    * Creates a new, empty AVL tree.
    *
+   *
    * # Returns
    *
-   * A new instance of `AVLTree` with no nodes.
+   * A new instance of AVLTree with no nodes.
+   *
+   *
    */
   constructor()
   /**
    * Inserts a single node with the specified key and value into the AVL tree.
    *
+   *
    * If a node with the same key already exists, its value is updated to the provided value.
+   *
    *
    * # Parameters
    *
-   * - `key`: A number or a string that represents the key.
-   * - `value`: A number or a string that represents the value.
+   * - key: A number or a string that represents the key.
+   * - value: A number or a string that represents the value.
+   *
    *
    * # Example (TypeScript)
+   *
    *
    * ```ts
    * const tree = new AvlTree();
    * tree.insert(42, "The answer");
    * ```
+   *
+   *
    */
   insert(key: number | string, value: number | string): void
   /**
    * Inserts multiple nodes at once into the AVL tree.
    *
-   * Accepts an array of objects where each object has a `key` and `value` property.
+   *
+   * Accepts an array of objects where each object has a key and value property.
    * This is useful for bulk insertion.
+   *
    *
    * # Parameters
    *
-   * - `nodes`: An array of key/value pairs, where each pair is represented by an object
-   *            with properties `key` and `value`. Each key and value can be a number or a string.
+   * - nodes: An array of key/value pairs, where each pair is represented by an object
+   *            with properties key and value. Each key and value can be a number or a string.
+   *
    *
    * # Example (TypeScript)
+   *
    *
    * ```ts
    * tree.bulkInsert([
@@ -68,23 +81,30 @@ export declare class AvlTree {
    *   { key: 20, value: "twenty" }
    * ]);
    * ```
+   *
+   *
    */
   bulkInsert(nodes: Array<NodeEntry>): void
   /**
    * Searches for a node in the AVL tree by its key.
    *
+   *
    * If a node with the specified key exists, returns its associated value.
-   * Otherwise, returns `null`.
+   * Otherwise, returns null.
+   *
    *
    * # Parameters
    *
-   * - `key`: The key to search for (number or string).
+   * - key: The key to search for (number or string).
+   *
    *
    * # Returns
    *
-   * The value associated with the key if found, or `null` if no such node exists.
+   * The value associated with the key if found, or null if no such node exists.
+   *
    *
    * # Example (TypeScript)
+   *
    *
    * ```ts
    * const value = tree.search("myKey");
@@ -94,24 +114,65 @@ export declare class AvlTree {
    *   console.log("Not found");
    * }
    * ```
+   *
+   *
    */
   search(key: number | string): number | string | null
   /**
    * Returns a string representing all nodes in the AVL tree using in-order traversal.
    *
+   *
    * The returned string lists the nodes in sorted order by key. Each node is represented
    * by its key and value.
+   *
    *
    * # Returns
    *
    * A string that contains the representation of all nodes in the tree.
    *
+   *
    * # Example (TypeScript)
+   *
    *
    * ```ts
    * console.log(tree.dump());
    * // Might output: "{ key: 5, value: 'five' }, { key: 10, value: 'ten' }, { key: 15, value: 'fifteen' }"
    * ```
+   *
+   *
    */
   dump(): string
+  /**
+   * Removes a node from the AVL tree by its key.
+   *
+   *
+   * If a node with the specified key exists, it is removed from the tree and its associated
+   * value is returned. If no such node exists, null is returned.
+   *
+   *
+   * # Parameters
+   *
+   * - key: A number or a string that represents the key of the node to be removed.
+   *
+   *
+   * # Returns
+   *
+   * The value associated with the removed node if removal was successful, or null otherwise.
+   *
+   *
+   * # Example (TypeScript)
+   *
+   *
+   * ```ts
+   * const removedValue = tree.remove(42);
+   * if (removedValue !== null) {
+   *   console.log("Removed:", removedValue);
+   * } else {
+   *   console.log("Key not found");
+   * }
+   * ```
+   *
+   *
+   */
+  remove(key: number | string): number | string | null
 }

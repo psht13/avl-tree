@@ -1,6 +1,6 @@
 # avl-tree-rust
 
-**avl-tree-rust** is a high-performance native AVL tree library for Node.js. Written in Rust and exposed through N-API, this library offers efficient self-balancing tree operations such as insertion, search, and in-order traversal. It supports both numbers and strings as keys and values, and even provides bulk insertion for added convenience.
+**avl-tree-rust** is a high-performance native AVL tree library for Node.js. Written in Rust and exposed through N-API, this library offers efficient self-balancing tree operations such as insertion, removal, search, and in-order traversal. It supports both numbers and strings as keys and values, and even provides bulk insertion for added convenience.
 
 > **Note:** This library is designed for Node.js environments only and has not been tested in browsers.
 
@@ -11,6 +11,7 @@
 - **Flexible Data Types:** Supports keys and values as either numbers or strings.
 - **Bulk Insertion:** Insert multiple key/value pairs in a single call.
 - **In-Order Traversal:** Retrieve a sorted string representation of the tree contents.
+- **Removal:** Remove nodes by key while preserving AVL balance.
 
 ## Prerequisites
 
@@ -54,10 +55,18 @@ if (result !== null) {
   console.log('Not found');
 }
 
+// Remove a node by key
+const removed = tree.remove(5);
+if (removed !== null) {
+  console.log('Removed:', removed);
+} else {
+  console.log('Key not found for removal');
+}
+
 // Dump the tree (in-order traversal)
 console.log('Tree dump:', tree.dump());
 // Example output:
-// "{ key: Number(5), value: String("five") }, { key: Number(7), value: String("seven") }, { key: Number(10), value: String("ten") }, { key: Number(12), value: String("twelve") }, { key: Number(15), value: String("fifteen") }"
+// "{ key: Number(7), value: String("seven") }, { key: Number(10), value: String("ten") }, { key: Number(12), value: String("twelve") }, { key: Number(15), value: String("fifteen") }"
 ```
 
 ## API Reference
@@ -102,9 +111,23 @@ If a node with the same key already exists, its value is updated.
 
 ---
 
+### `remove(key)`
+
+**Removes a node from the tree by its key and returns its associated value.**
+
+#### Parameters:
+
+- `key`: A number or a string representing the key of the node to be removed.
+
+If the node exists, it is removed and its value is returned; if not, `null` is returned.
+
+---
+
 ### `dump()`
 
 **Returns a string representing all nodes in the tree (via in-order traversal), displaying nodes sorted by key.**
+
+---
 
 ## License
 
@@ -114,3 +137,5 @@ MIT License
 
 Pavlo Yurchenko  
 [pashtet.gm@gmail.com](mailto:pashtet.gm@gmail.com)
+
+---
