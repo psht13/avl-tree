@@ -1,3 +1,3 @@
 const { AvlTree } = require('./dist');
 
-module.exports = { AvlTree };
+module.exports = AvlTree;
