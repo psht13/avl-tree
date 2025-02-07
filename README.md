@@ -31,7 +31,7 @@ Below is a simple example demonstrating how to use **avl-tree-rust** in your Nod
 
 ```js
 // Import the AVL tree class from the package
-import { AvlTree } from 'avl-tree-rust';
+import AvlTree from 'avl-tree-rust';
 
 // Create a new AVL tree instance
 const tree = new AvlTree();
