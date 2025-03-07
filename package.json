@@ -1,10 +1,10 @@
 {
   "name": "avl-tree-rust",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "High-performance native AVL tree library for Node.js.",
   "module": "index",
-  "main": "index.js",
-  "types": "index.d.ts",
+  "main": "./index.js",
+  "types": "./index.d.ts",
   "scripts": {
     "build": "napi build --release ./dist",
     "lint": "eslint . --fix",
