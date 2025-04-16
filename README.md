@@ -4,6 +4,8 @@
 
 > **Note:** This library is designed for Node.js environments only and has not been tested in browsers.
 
+> **Platform Compatibility:** The library is primarily built and tested on Linux environments. While it should work on other platforms, compatibility is not guaranteed. If you encounter issues, you can try building from source using `npm run build`.
+
 ## Features
 
 - **Native Performance:** Leverages Rust's speed for fast tree operations.
@@ -15,6 +17,9 @@
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) (v12 or higher recommended)
+- For building from source:
+  - Rust toolchain
+  - Build essentials (`build-essential` package on Ubuntu/Debian)
 
 ## Installation
 
@@ -22,6 +27,15 @@ Install via npm:
 
 ```bash
 npm install avl-tree-rust
+```
+
+If you need to build from source:
+
+```bash
+git clone https://github.com/psht13/avl-tree.git
+cd avl-tree
+npm install
+npm run build
 ```
 
 ## Usage Example
