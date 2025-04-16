@@ -58,61 +58,6 @@ impl AVLTree {
         self.root = Self::insert_node(self.root.take(), key, value);
     }
 
-    /// Inserts multiple nodes at once into the AVL tree.
-    ///
-    ///
-    /// Accepts an array of objects where each object has a key and value property.
-    /// This is useful for bulk insertion.
-    ///
-    ///
-    /// # Parameters
-    ///
-    /// - nodes: An array of key/value pairs, where each pair is represented by an object
-    ///            with properties key and value. Each key and value can be a number or a string.
-    ///
-    ///
-    /// # Example (TypeScript)
-    ///
-    ///
-    /// ```ts
-    /// tree.bulkInsert([
-    ///   { key: 10, value: "ten" },
-    ///   { key: 20, value: "twenty" }
-    /// ]);
-    /// ```
-    ///
-    ///
-    #[napi]
-    pub fn bulk_insert(&mut self, nodes: Vec<NodeEntry>) {
-        if nodes.is_empty() {
-            return;
-        }
-        // Convert the input into a vector of (KeyValue, KeyValue)
-        let mut entries: Vec<(KeyValue, KeyValue)> = nodes
-            .into_iter()
-            .map(|entry| (entry.key.into(), entry.value.into()))
-            .collect();
-
-        // Sort the entries by key.
-        entries.sort_by(|(key1, _), (key2, _)| key1.cmp(key2));
-
-        // Remove duplicate keys by keeping the last inserted value.
-        let mut unique_entries: Vec<(KeyValue, KeyValue)> = Vec::with_capacity(entries.len());
-        for (key, value) in entries {
-            if let Some(last) = unique_entries.last_mut() {
-                if last.0 == key {
-                    // Overwrite the value for this key.
-                    last.1 = value;
-                    continue;
-                }
-            }
-            unique_entries.push((key, value));
-        }
-
-        // Build a balanced tree from the sorted unique entries.
-        self.root = Self::build_balanced(&unique_entries);
-    }
-
     /// Searches for a node in the AVL tree by its key.
     ///
     ///
@@ -221,6 +166,40 @@ impl AVLTree {
         })
     }
 
+    /// Checks if a node with the specified key exists in the AVL tree.
+    ///
+    ///
+    /// # Parameters
+    ///
+    /// - key: A number or a string that represents the key to check.
+    ///
+    ///
+    /// # Returns
+    ///
+    /// `true` if a node with the specified key exists, `false` otherwise.
+    ///
+    ///
+    /// # Example (TypeScript)
+    ///
+    ///
+    /// ```ts
+    /// const tree = new AvlTree();
+    /// tree.insert(42, "The answer");
+    ///
+    /// if (tree.has(42)) {
+    ///   console.log("Key exists in the tree");
+    /// } else {
+    ///   console.log("Key not found");
+    /// }
+    /// ```
+    ///
+    ///
+    #[napi]
+    pub fn has(&self, key: Either<i32, String>) -> bool {
+        let key: KeyValue = key.into();
+        Self::search_node(&self.root, &key).is_some()
+    }
+
     // --- Internal AVL tree functions ---
 
     // Recursive insertion function.
@@ -244,20 +223,6 @@ impl AVLTree {
         } else {
             Some(Box::new(Node::new(key, value)))
         }
-    }
-
-    /// Helper function to build a balanced AVL tree from a sorted slice of key/value pairs.
-    fn build_balanced(entries: &[(KeyValue, KeyValue)]) -> Option<Box<Node>> {
-        if entries.is_empty() {
-            return None;
-        }
-        let mid = entries.len() / 2;
-        let (key, value) = &entries[mid];
-        let mut node = Box::new(Node::new(key.clone(), value.clone()));
-        node.left = Self::build_balanced(&entries[..mid]);
-        node.right = Self::build_balanced(&entries[mid + 1..]);
-        node.update_height();
-        Some(node)
     }
 
     // Recursive search function.
@@ -465,16 +430,4 @@ impl From<Either<i32, String>> for KeyValue {
             Either::B(s) => KeyValue::String(s),
         }
     }
-}
-
-/// A helper struct to represent a key/value pair for bulk insertion.
-///
-/// This struct is annotated with #[napi(object)] so that you can pass an array
-/// of such objects from Node.js.
-#[napi(object)]
-pub struct NodeEntry {
-    /// The key for the node, as a number or string.
-    pub key: Either<i32, String>,
-    /// The value for the node, as a number or string.
-    pub value: Either<i32, String>,
 }
