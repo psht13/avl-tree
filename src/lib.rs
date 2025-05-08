@@ -69,8 +69,8 @@ impl AVLTree {
     /// }
     /// ```
     #[napi]
-    pub fn find(&self, key: i32) -> Option<String> {
-        Self::search_node(&self.root, key)
+    pub fn find(&self, key: i32) -> Option<&str> {
+        Self::search_node(&self.root, key).map(|s| s.as_str())
     }
 
     /// Returns a string representing all nodes in the AVL tree using in-order traversal.
@@ -175,16 +175,16 @@ impl AVLTree {
         }
     }
 
-    fn search_node(node: &Option<Box<Node>>, key: i32) -> Option<String> {
-        if let Some(n) = node {
+    fn search_node(node: &Option<Box<Node>>, key: i32) -> Option<&String> {
+        let mut current = node.as_ref();
+        while let Some(n) = current {
             match key.cmp(&n.key) {
-                Ordering::Less => Self::search_node(&n.left, key),
-                Ordering::Greater => Self::search_node(&n.right, key),
-                Ordering::Equal => Some(n.value.clone()),
+                Ordering::Less => current = n.left.as_ref(),
+                Ordering::Greater => current = n.right.as_ref(),
+                Ordering::Equal => return Some(&n.value),
             }
-        } else {
-            None
         }
+        None
     }
 
     fn balance(mut node: Box<Node>) -> Box<Node> {
