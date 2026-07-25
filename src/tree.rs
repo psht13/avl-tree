@@ -1,17 +1,26 @@
 use std::cmp::Ordering;
+use std::fmt::Write;
 
 /// The pure Rust AVL tree core.
 pub struct Tree {
     root: Option<Box<Node>>,
+    len: usize,
 }
 
 impl Tree {
     pub fn new() -> Self {
-        Self { root: None }
+        Self { root: None, len: 0 }
     }
 
     pub fn insert(&mut self, key: i32, value: String) {
-        self.root = Self::insert_node(self.root.take(), key, value);
+        let mut inserted = false;
+        self.root = Some(Self::insert_node(
+            self.root.take(),
+            key,
+            value,
+            &mut inserted,
+        ));
+        self.len += usize::from(inserted);
     }
 
     pub fn find(&self, key: i32) -> Option<&str> {
@@ -21,6 +30,7 @@ impl Tree {
     pub fn remove(&mut self, key: i32) -> Option<String> {
         let (new_root, removed) = Self::remove_node(self.root.take(), key);
         self.root = new_root;
+        self.len -= usize::from(removed.is_some());
         removed
     }
 
@@ -29,29 +39,49 @@ impl Tree {
     }
 
     pub fn dump(&self) -> String {
-        let mut entries = Vec::new();
-        Self::traverse_in_order(&self.root, &mut entries);
-        entries.join(", ")
+        let mut output = String::with_capacity(self.len.saturating_mul(32));
+        let mut first = true;
+        Self::write_in_order(&self.root, &mut output, &mut first);
+        output
     }
 
-    fn insert_node(node: Option<Box<Node>>, key: i32, value: String) -> Option<Box<Node>> {
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn insert_node(
+        node: Option<Box<Node>>,
+        key: i32,
+        value: String,
+        inserted: &mut bool,
+    ) -> Box<Node> {
         if let Some(mut node) = node {
             match key.cmp(&node.key) {
                 Ordering::Less => {
-                    node.left = Self::insert_node(node.left.take(), key, value);
+                    node.left = Some(Self::insert_node(node.left.take(), key, value, inserted));
                 }
                 Ordering::Greater => {
-                    node.right = Self::insert_node(node.right.take(), key, value);
+                    node.right = Some(Self::insert_node(node.right.take(), key, value, inserted));
                 }
                 Ordering::Equal => {
                     node.value = value;
-                    return Some(node);
+                    return node;
                 }
             }
-            node.update_height();
-            Some(Self::balance(node))
+
+            if *inserted {
+                node.update_height();
+                Self::balance(node)
+            } else {
+                node
+            }
         } else {
-            Some(Box::new(Node::new(key, value)))
+            *inserted = true;
+            Box::new(Node::new(key, value))
         }
     }
 
@@ -129,50 +159,61 @@ impl Tree {
         pivot
     }
 
-    fn traverse_in_order(node: &Option<Box<Node>>, entries: &mut Vec<String>) {
+    fn write_in_order(node: &Option<Box<Node>>, output: &mut String, first: &mut bool) {
         if let Some(node) = node {
-            Self::traverse_in_order(&node.left, entries);
-            entries.push(format!("{{ key: {}, value: '{}' }}", node.key, node.value));
-            Self::traverse_in_order(&node.right, entries);
+            Self::write_in_order(&node.left, output, first);
+            if *first {
+                *first = false;
+            } else {
+                output.push_str(", ");
+            }
+            write!(output, "{{ key: {}, value: '{}' }}", node.key, node.value)
+                .expect("writing to a String cannot fail");
+            Self::write_in_order(&node.right, output, first);
         }
     }
 
     fn remove_node(node: Option<Box<Node>>, key: i32) -> (Option<Box<Node>>, Option<String>) {
-        if let Some(mut node) = node {
-            let removed = match key.cmp(&node.key) {
-                Ordering::Less => {
-                    let (new_left, removed) = Self::remove_node(node.left.take(), key);
-                    node.left = new_left;
-                    removed
-                }
-                Ordering::Greater => {
-                    let (new_right, removed) = Self::remove_node(node.right.take(), key);
-                    node.right = new_right;
-                    removed
-                }
-                Ordering::Equal => {
-                    let removed_value = Some(node.value.clone());
-                    if node.left.is_none() {
-                        return (node.right.take(), removed_value);
-                    } else if node.right.is_none() {
-                        return (node.left.take(), removed_value);
-                    } else {
-                        let right = node
-                            .right
-                            .take()
-                            .expect("a two-child removal must have a right child");
-                        let (new_right, minimum) = Self::remove_min(right);
-                        node.right = new_right;
-                        node.key = minimum.key;
-                        node.value = minimum.value;
-                        removed_value
+        let Some(mut node) = node else {
+            return (None, None);
+        };
+
+        match key.cmp(&node.key) {
+            Ordering::Less => {
+                let (new_left, removed) = Self::remove_node(node.left.take(), key);
+                node.left = new_left;
+                let Some(removed) = removed else {
+                    return (Some(node), None);
+                };
+                node.update_height();
+                (Some(Self::balance(node)), Some(removed))
+            }
+            Ordering::Greater => {
+                let (new_right, removed) = Self::remove_node(node.right.take(), key);
+                node.right = new_right;
+                let Some(removed) = removed else {
+                    return (Some(node), None);
+                };
+                node.update_height();
+                (Some(Self::balance(node)), Some(removed))
+            }
+            Ordering::Equal => {
+                let Node {
+                    value, left, right, ..
+                } = *node;
+
+                match (left, right) {
+                    (None, right) => (right, Some(value)),
+                    (left, None) => (left, Some(value)),
+                    (Some(left), Some(right)) => {
+                        let (new_right, mut successor) = Self::remove_min(right);
+                        successor.left = Some(left);
+                        successor.right = new_right;
+                        successor.update_height();
+                        (Some(Self::balance(successor)), Some(value))
                     }
                 }
-            };
-            node.update_height();
-            (Some(Self::balance(node)), removed)
-        } else {
-            (None, None)
+            }
         }
     }
 

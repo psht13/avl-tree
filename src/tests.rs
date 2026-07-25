@@ -46,6 +46,9 @@ fn assert_valid(tree: &Tree) -> Vec<(i32, String)> {
     let (_, count) = validate_node(&tree.root, None, None, &mut entries);
 
     assert_eq!(count, entries.len());
+    assert_eq!(count, tree.len);
+    assert_eq!(tree.len(), tree.len);
+    assert_eq!(tree.is_empty(), tree.len == 0);
     assert!(
         entries.windows(2).all(|pair| pair[0].0 < pair[1].0),
         "in-order traversal is not strictly ordered"
@@ -71,12 +74,14 @@ fn assert_matches_model(tree: &Tree, model: &BTreeMap<i32, String>) {
 #[test]
 fn empty_tree_behavior() {
     let mut tree = Tree::new();
+    let default_tree = Tree::default();
 
     assert_eq!(tree.find(1), None);
     assert!(!tree.has(1));
     assert_eq!(tree.remove(1), None);
     assert_eq!(tree.dump(), "");
     assert!(assert_valid(&tree).is_empty());
+    assert!(default_tree.is_empty());
 }
 
 #[test]
@@ -89,6 +94,7 @@ fn one_insertion_and_duplicate_replacement() {
 
     tree.insert(7, "replacement".to_owned());
     assert_eq!(tree.find(7), Some("replacement"));
+    assert_eq!(tree.len(), 1);
     assert_eq!(assert_valid(&tree), vec![(7, "replacement".to_owned())]);
 }
 
