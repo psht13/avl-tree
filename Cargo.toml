@@ -7,5 +7,16 @@ edition = "2021"
 napi = { version = "2.16.13", features = ["napi4"] }
 napi-derive = "2.16.13"
 
+[build-dependencies]
+napi-build = "2.3.2"
+
+[dev-dependencies]
+criterion = "0.8.2"
+proptest = "1.11.0"
+
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
+
+[[bench]]
+name = "avl_tree"
+harness = false
