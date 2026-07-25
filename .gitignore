@@ -1,2 +1,8 @@
 /target
 /node_modules
+/npm
+/artifacts
+/release
+/dist
+/*.node
+/*.tgz

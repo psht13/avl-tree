@@ -1,3 +1,3 @@
-'use strict';
-import { AvlTree } from './dist';
+import { AvlTree } from './native';
+
 export = AvlTree;

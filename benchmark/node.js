@@ -4,7 +4,7 @@ const { execFileSync } = require('node:child_process');
 const { writeFileSync } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { performance } = require('node:perf_hooks');
+const { performance: nodePerformance } = require('node:perf_hooks');
 
 const modulePath = process.env.AVL_TREE_MODULE || path.join(__dirname, '..');
 const AvlTree = require(modulePath);
@@ -42,7 +42,9 @@ function buildTree(input) {
 }
 
 function percentile(sorted, ratio) {
-  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1)];
+  return sorted[
+    Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1)
+  ];
 }
 
 function measure(name, size, operations, setup, run) {
@@ -50,9 +52,9 @@ function measure(name, size, operations, setup, run) {
 
   for (let iteration = 0; iteration < WARMUPS + SAMPLES; iteration += 1) {
     const fixture = setup();
-    const start = performance.now();
+    const start = nodePerformance.now();
     run(fixture);
-    const elapsedNs = (performance.now() - start) * 1e6;
+    const elapsedNs = (nodePerformance.now() - start) * 1e6;
 
     if (iteration >= WARMUPS) {
       samples.push(elapsedNs / operations);
@@ -86,7 +88,9 @@ const results = [];
 for (const size of SIZES) {
   const randomKeys = shuffledKeys(size);
   const randomEntries = entries(randomKeys);
-  const ascendingEntries = entries(Array.from({ length: size }, (_, key) => key));
+  const ascendingEntries = entries(
+    Array.from({ length: size }, (_, key) => key)
+  );
   const descendingEntries = [...ascendingEntries].reverse();
 
   for (const [name, input] of [
@@ -217,9 +221,32 @@ for (const size of SIZES) {
 
 const topologyBatch = 4_096;
 for (const [name, input, key] of [
-  ['remove/leaf', [[2, 'two'], [1, 'one'], [3, 'three']], 1],
-  ['remove/one_child', [[2, 'two'], [1, 'one']], 2],
-  ['remove/two_children', [[2, 'two'], [1, 'one'], [3, 'three']], 2],
+  [
+    'remove/leaf',
+    [
+      [2, 'two'],
+      [1, 'one'],
+      [3, 'three'],
+    ],
+    1,
+  ],
+  [
+    'remove/one_child',
+    [
+      [2, 'two'],
+      [1, 'one'],
+    ],
+    2,
+  ],
+  [
+    'remove/two_children',
+    [
+      [2, 'two'],
+      [1, 'one'],
+      [3, 'three'],
+    ],
+    2,
+  ],
 ]) {
   results.push(
     measure(

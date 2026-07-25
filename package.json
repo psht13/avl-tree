@@ -1,20 +1,66 @@
 {
   "name": "avl-tree-rust",
   "version": "2.1.2",
-  "description": "High-performance native AVL tree library for Node.js.",
-  "module": "index",
+  "description": "A native AVL tree for Node.js with signed 32-bit keys and string values.",
   "main": "./index.js",
   "types": "./index.d.ts",
+  "type": "commonjs",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "require": "./index.js",
+      "import": "./index.js",
+      "default": "./index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "native.js",
+    "native.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": "^22.0.0 || ^24.0.0"
+  },
+  "napi": {
+    "binaryName": "avl-tree-rust",
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-gnu",
+      "aarch64-unknown-linux-musl",
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
   "scripts": {
-    "build": "napi build --release ./dist",
+    "build": "node scripts/build-native.js",
+    "build:debug": "node scripts/build-native.js --debug",
+    "artifacts": "napi artifacts --output-dir artifacts --npm-dir npm",
+    "create-npm-dirs": "napi create-npm-dirs --npm-dir npm",
+    "release:assemble": "node scripts/assemble-release.js",
     "test:rust": "cargo test --all-targets",
     "test:node": "node --test test/*.test.js",
-    "test": "npm run test:rust && npm run test:node",
+    "test:package": "node scripts/test-package.js",
+    "test": "npm run build && npm run test:rust && npm run test:node && npm run test:package",
+    "coverage:rust": "node scripts/rust-coverage.js",
+    "coverage:node": "node scripts/node-coverage.js",
+    "coverage": "npm run coverage:rust && npm run coverage:node",
     "benchmark:rust": "cargo bench --bench avl_tree",
     "benchmark:node": "node benchmark/node.js",
     "benchmark": "npm run benchmark:rust && npm run benchmark:node",
-    "lint": "eslint . --fix",
-    "format": "prettier --write ."
+    "format": "prettier --write . && cargo fmt --all",
+    "format:check": "prettier --check . && cargo fmt --all -- --check",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "native:check": "node scripts/check-generated.js",
+    "publint": "publint --strict",
+    "pack:check": "npm run publint && node scripts/test-package.js --pack-only",
+    "validate": "node scripts/validate.js"
   },
   "repository": {
     "type": "git",
@@ -33,10 +79,12 @@
   },
   "homepage": "https://github.com/psht13/avl-tree#readme",
   "devDependencies": {
-    "@eslint/js": "^9.19.0",
-    "@napi-rs/cli": "^2.18.4",
-    "eslint": "^9.19.0",
-    "globals": "^15.14.0",
-    "prettier": "^3.5.3"
+    "@eslint/js": "^10.0.1",
+    "@napi-rs/cli": "^3.7.4",
+    "eslint": "^10.8.0",
+    "globals": "^17.7.0",
+    "prettier": "^3.9.6",
+    "publint": "^0.3.22",
+    "typescript": "^7.0.2"
   }
 }

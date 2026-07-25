@@ -11,6 +11,10 @@ describe('module loading', () => {
   it('exports the constructor through CommonJS', () => {
     assert.equal(typeof AvlTree, 'function');
     assert.equal(AvlTree.name, 'AvlTree');
+    assert.deepEqual(
+      Object.getOwnPropertyNames(AvlTree.prototype).sort(),
+      ['constructor', 'dump', 'find', 'has', 'insert', 'remove'].sort()
+    );
   });
 
   it('exports the same constructor as an ESM default import', async () => {
@@ -43,11 +47,14 @@ describe('public contract', () => {
     assert.equal(tree.find(9), null);
     assert.equal(tree.has(1), true);
     assert.equal(tree.has(9), false);
-    assert.equal(tree.dump(), [
-      "{ key: 1, value: 'one' }",
-      "{ key: 2, value: 'TWO' }",
-      "{ key: 3, value: 'three' }",
-    ].join(', '));
+    assert.equal(
+      tree.dump(),
+      [
+        "{ key: 1, value: 'one' }",
+        "{ key: 2, value: 'TWO' }",
+        "{ key: 3, value: 'three' }",
+      ].join(', ')
+    );
     assert.equal(tree.remove(2), 'TWO');
     assert.equal(tree.remove(2), null);
     assert.equal(
@@ -93,7 +100,7 @@ describe('public contract', () => {
 
   it('preserves the legacy debug format for ambiguous string contents', () => {
     const tree = new AvlTree();
-    tree.insert(1, "quotes: ' and \"");
+    tree.insert(1, 'quotes: \' and "');
     tree.insert(2, 'commas, braces { }');
     tree.insert(3, 'Привіт 🌳');
     tree.insert(4, '');
@@ -146,7 +153,7 @@ describe('observed NAPI input conversion', () => {
   });
 
   it('rejects missing required arguments and ignores extra arguments', () => {
-    const tree = new AvlTree();
+    const tree = new AvlTree('ignored');
 
     assert.throws(() => tree.insert(), { code: 'NumberExpected' });
     assert.throws(() => tree.insert(1), { code: 'StringExpected' });
@@ -156,6 +163,8 @@ describe('observed NAPI input conversion', () => {
 
     assert.equal(tree.insert(1, 'one', 'ignored'), undefined);
     assert.equal(tree.find(1, 'ignored'), 'one');
+    assert.equal(tree.has(1, 'ignored'), true);
     assert.equal(tree.remove(1, 'ignored'), 'one');
+    assert.equal(tree.dump('ignored'), '');
   });
 });

@@ -1,0 +1,133 @@
+name: Native release preparation
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            arguments: --use-napi-cross
+            zig: false
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            arguments: -x
+            zig: true
+          - host: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            arguments: ''
+            zig: false
+          - host: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            arguments: -x
+            zig: true
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            arguments: ''
+            zig: false
+          - host: macos-15-intel
+            target: x86_64-apple-darwin
+            arguments: ''
+            zig: false
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+            arguments: ''
+            zig: false
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+          targets: ${{ matrix.target }}
+
+      - name: Set up Zig
+        if: matrix.zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.1
+
+      - name: Install cargo-zigbuild
+        if: matrix.zig
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build native addon
+        run: npm run build -- --target ${{ matrix.target }} ${{ matrix.arguments }}
+        shell: bash
+
+      - name: Upload native addon
+        uses: actions/upload-artifact@v7
+        with:
+          name: binding-${{ matrix.target }}
+          path: avl-tree-rust.*.node
+          if-no-files-found: error
+
+  assemble:
+    name: Assemble inspectable npm tarballs
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download native addons
+        uses: actions/download-artifact@v8
+        with:
+          pattern: binding-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create platform packages
+        run: |
+          npm run create-npm-dirs
+          npm run artifacts
+
+      - name: Assemble release tarballs
+        run: npm run release:assemble
+
+      - name: Upload release preparation
+        uses: actions/upload-artifact@v7
+        with:
+          name: npm-release-preparation
+          path: |
+            release
+            npm
+            native.js
+            native.d.ts
+          if-no-files-found: error

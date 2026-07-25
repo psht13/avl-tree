@@ -1,3 +1,7 @@
 'use strict';
-const { AvlTree } = require('./dist');
-module.exports = AvlTree;
+
+function loadNativeConstructor() {
+  return require('./native.js').AvlTree;
+}
+
+module.exports = loadNativeConstructor();
