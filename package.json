@@ -1,6 +1,6 @@
 {
   "name": "avl-tree-rust",
-  "version": "2.1.2",
+  "version": "2.2.0",
   "description": "A native AVL tree for Node.js with signed 32-bit keys and string values.",
   "main": "./index.js",
   "types": "./index.d.ts",

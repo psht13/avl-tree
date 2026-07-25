@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 2.2.0 - 2026-07-25
+
 ### Changed
 
 - Split the pure Rust AVL core from the thin NAPI-RS class boundary.
@@ -47,6 +49,3 @@ All notable changes to this project are documented here. The format follows
   text are unchanged.
 - Strict integer validation would be a future major-version change and is not
   included here.
-
-No package version has been changed and nothing in this section has been
-published.
