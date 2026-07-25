@@ -22,7 +22,8 @@ Lower values are better. A negative change is an improvement.
 | ----------------------- | ----------------------------------------------------- |
 | Reviewed implementation | `2e9e6b83c17f7fffcc40cefa5c9216991fcb87e4`            |
 | Baseline harness commit | `173f04752e3f12e802f4d9f0ebf741dde55bb879`            |
-| Final branch            | `refactor/performance-coverage-docs`                  |
+| Final branch            | `main`                                                |
+| Final implementation    | `29e48b10c086b97654e88ddd9b32de76879cab98`            |
 | OS                      | macOS 26.5.2, Darwin 25.5.0                           |
 | Architecture            | arm64                                                 |
 | CPU                     | Apple M5                                              |
