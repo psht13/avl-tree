@@ -32,16 +32,19 @@ that justifies the maintenance cost.
 
 ### NAPI-RS version policy
 
-The Rust crate remains on the maintained NAPI-RS 2 patch line (`napi` 2.16.17
-and `napi-derive` 2.16.13), with `dyn-symbols` for portable addon loading. The
-current NAPI-RS 3 CLI is used for deterministic loaders and platform packages;
-that packaging flow does not require migrating the Rust API.
+The Rust bindings and CLI use NAPI-RS 3 (`napi` 3.11.0, `napi-derive` 3.6.0,
+and `@napi-rs/cli` 3.7.4), with `dyn-symbols` for portable addon loading. A
+clean Linux build proved that mixing the v2 derive macro with the v3 CLI could
+produce an empty generated declaration: the two major versions use different
+type-definition protocols. Keeping the current platform-package workflow
+therefore provides a concrete correctness and packaging reason to align the
+Rust crates with v3.
 
-NAPI-RS 3 was prototyped against the complete Node contract, but it did not
-remove wrapper code or add a required target. An unnecessary Rust API major
-migration was therefore rejected. Revisit this only when the
-[migration guidance](https://napi.rs/docs/more/v2-v3-migration-guide) identifies
-a concrete correctness or packaging benefit for this addon.
+The migration was checked against the complete Node contract, packed-package
+declaration consumers, and the
+[official migration guidance](https://napi.rs/docs/more/v2-v3-migration-guide).
+It does not change this package's JavaScript API or Node-API conversion
+behavior.
 
 ## Tests
 

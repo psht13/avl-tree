@@ -43,10 +43,16 @@ if (result.status !== 0) {
 
 const loaderPath = path.join(root, 'native.js');
 const loader = readFileSync(loaderPath, 'utf8');
+const declaration = readFileSync(path.join(root, 'native.d.ts'), 'utf8');
 const original = '`Cannot find native binding. ` +';
 const actionable =
   '`Cannot find native binding for ${process.platform}/${process.arch}. ` +';
 
+if (!declaration.includes('export declare class AvlTree')) {
+  throw new Error(
+    'Generated native.d.ts does not declare AvlTree; verify that the NAPI-RS Rust crates and CLI use the same major version'
+  );
+}
 if (!loader.includes(original) && !loader.includes(actionable)) {
   throw new Error(
     'Generated loader error text no longer matches the expected form'

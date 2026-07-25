@@ -13,8 +13,9 @@ All notable changes to this project are documented here. The format follows
 - Build `dump()` into one output buffer while preserving its exact legacy
   format.
 - Track tree length for capacity planning and invariant validation.
-- Keep NAPI-RS on the maintained 2.x line while adopting current NAPI-RS CLI
-  platform-package tooling and dynamic symbol loading.
+- Align the Rust bindings with NAPI-RS 3 so clean builds use the current CLI's
+  declaration and platform-package tooling, while retaining dynamic symbol
+  loading.
 - Replace the checked-in single-platform binary with generated bindings,
   platform-specific optional package preparation, and actionable unsupported
   platform errors.

@@ -89,31 +89,34 @@ pointer encoding was rejected.
 
 The Node harness performs three warm-up passes and eleven measured passes per
 workload. The table pools two counterbalanced baseline/final runs, or 22 samples
-per side, and reports nanoseconds per public operation. A prior pass that
-overlapped an unrelated high-CPU process was discarded before analysis rather
-than used to support a performance claim.
+per side, and reports nanoseconds per public operation. Passes that overlapped
+an unrelated high-CPU test process were discarded before analysis rather than
+used to support a performance claim. The final runs use the aligned NAPI-RS 3
+binding.
 
 | Workload                       | Baseline median / p95 | Final median / p95 | Change |
 | ------------------------------ | --------------------: | -----------------: | -----: |
-| Random insert, 100,000         |    183.96 / 187.65 ns | 190.88 / 196.25 ns |  +3.8% |
-| Ascending insert, 100,000      |    106.20 / 108.75 ns | 106.87 / 115.20 ns |  +0.6% |
-| Descending insert, 100,000     |    101.67 / 106.51 ns | 109.53 / 127.82 ns |  +7.7% |
-| Duplicate update, 100,000      |    211.66 / 390.58 ns | 207.43 / 358.39 ns |  -2.0% |
-| Successful lookup, 100,000     |    139.16 / 149.00 ns | 136.90 / 143.49 ns |  -1.6% |
-| Missing lookup, 100,000        |      37.78 / 39.88 ns |   36.50 / 37.46 ns |  -3.4% |
-| Missing removal, 100,000       |      77.58 / 83.32 ns |   60.28 / 61.81 ns | -22.3% |
-| Read-heavy mixed, 100,000      |    148.13 / 218.73 ns | 144.52 / 161.81 ns |  -2.4% |
-| Balanced mutation, 100,000     |    281.71 / 423.06 ns | 273.10 / 280.10 ns |  -3.1% |
-| `dump()`, 100,000              |      51.02 / 74.40 ns |   29.44 / 36.24 ns | -42.3% |
-| Leaf removal, 4,096 trees      |      72.64 / 82.71 ns |   59.86 / 64.19 ns | -17.6% |
-| One-child removal, 4,096 trees |      68.20 / 74.52 ns |   55.81 / 61.08 ns | -18.2% |
-| Two-child removal, 4,096 trees |      71.97 / 75.64 ns |   57.87 / 58.64 ns | -19.6% |
+| Random insert, 100,000         |    178.06 / 182.07 ns | 185.59 / 192.68 ns |  +4.2% |
+| Ascending insert, 100,000      |    102.38 / 104.58 ns | 112.50 / 114.92 ns |  +9.9% |
+| Descending insert, 100,000     |     99.47 / 100.89 ns | 110.72 / 112.89 ns | +11.3% |
+| Duplicate update, 100,000      |    224.59 / 381.01 ns | 184.91 / 355.92 ns | -17.7% |
+| Successful lookup, 100,000     |    133.24 / 136.47 ns | 118.87 / 124.45 ns | -10.8% |
+| Missing lookup, 100,000        |      37.81 / 38.35 ns |   36.29 / 37.12 ns |  -4.0% |
+| Missing removal, 100,000       |      75.53 / 76.75 ns |   60.78 / 61.96 ns | -19.5% |
+| Read-heavy mixed, 100,000      |    143.43 / 146.70 ns | 129.06 / 133.21 ns | -10.0% |
+| Balanced mutation, 100,000     |    272.60 / 279.40 ns | 261.58 / 269.09 ns |  -4.0% |
+| `dump()`, 100,000              |      49.68 / 55.63 ns |   30.79 / 35.71 ns | -38.0% |
+| Leaf removal, 4,096 trees      |      72.55 / 73.47 ns |   61.43 / 68.65 ns | -15.3% |
+| One-child removal, 4,096 trees |      73.51 / 77.55 ns |   57.40 / 67.80 ns | -21.9% |
+| Two-child removal, 4,096 trees |      70.11 / 76.39 ns |   60.07 / 62.24 ns | -14.3% |
 
 The Node results are intentionally smaller in percentage terms for some core
 operations. Node-API dispatch and JavaScript/Rust string conversion are part of
 these measurements and can dominate short tree traversals. Criterion is the
 appropriate evidence for pure algorithm changes; this table is the consumer's
-end-to-end view.
+end-to-end view. The final NAPI-RS 3 alignment also changes boundary overhead,
+so the lookup and read-heavy gains in this table must not be attributed solely
+to the AVL algorithm.
 
 ## Native binary size
 
@@ -123,10 +126,14 @@ source on the same machine:
 | Artifact              |   Bytes | Change |
 | --------------------- | ------: | -----: |
 | Baseline Mach-O addon | 512,320 |      — |
-| Final Mach-O addon    | 418,400 | -18.3% |
+| Final Mach-O addon    | 451,536 | -11.9% |
 
 The checked-in baseline `dist/index.node` was a 587,920-byte Linux x64 ELF
 binary, so it is not used for this cross-architecture size comparison.
+Aligning the Rust bindings and CLI on NAPI-RS 3 increased the final candidate
+from 418,400 to 451,536 bytes (+7.9%), an accepted correctness and portability
+tradeoff after a clean Linux build exposed empty declarations from mixed major
+versions.
 
 ## Reproducing
 
