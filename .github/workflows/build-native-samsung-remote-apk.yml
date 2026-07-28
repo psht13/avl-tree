@@ -51,12 +51,17 @@ jobs:
             .build/native-samsung-remote-v0.5.0.part01-02-02.b64 \
             .build/native-samsung-remote-v0.5.0.part01-02-03.b64 \
             .build/native-samsung-remote-v0.5.0.part01-02-04.b64 \
-            .build/native-samsung-remote-v0.5.0.part01-02-05.b64 \
+            .build/native-samsung-remote-v0.5.0.part01-02-05-00.b64 \
+            .build/native-samsung-remote-v0.5.0.part01-02-05-01.b64 \
+            .build/native-samsung-remote-v0.5.0.part01-02-05-02.b64 \
+            .build/native-samsung-remote-v0.5.0.part01-02-05-03.b64 \
+            .build/native-samsung-remote-v0.5.0.part01-02-05-04.b64 \
             .build/native-samsung-remote-v0.5.0.part01-03.b64 \
             .build/native-samsung-remote-v0.5.0.part01-04.b64 \
             .build/native-samsung-remote-v0.5.0.part01-05.b64 \
             .build/native-samsung-remote-v0.5.0.part02.b64 \
             > /tmp/native-project.tar.xz.b64
+          echo "928948cbf2ea41fbe837bd797790fa67e6076960c5a7c19b9eb2dc5c00189ac9  /tmp/native-project.tar.xz.b64" | sha256sum --check -
           base64 --decode /tmp/native-project.tar.xz.b64 > /tmp/native-project.tar.xz
           echo "614dcdf6ad1fc7cbcf2a38e86ca223c5da9795907270172ff36c452876aec9bb  /tmp/native-project.tar.xz" | sha256sum --check -
           mkdir -p native-project
