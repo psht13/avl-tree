@@ -1,0 +1,71 @@
+name: Build Samsung Smart Remote Android APK
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".build/native-samsung-remote-v0.5.0.part*.b64"
+      - ".github/workflows/build-native-samsung-remote-apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout temporary build branch
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Restore native Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .build/native-samsung-remote-v0.5.0.part*.b64 > /tmp/native-project.tar.xz.b64
+          base64 --decode /tmp/native-project.tar.xz.b64 > /tmp/native-project.tar.xz
+          echo "614dcdf6ad1fc7cbcf2a38e86ca223c5da9795907270172ff36c452876aec9bb  /tmp/native-project.tar.xz" | sha256sum --check -
+          mkdir -p native-project
+          tar -xJf /tmp/native-project.tar.xz -C native-project
+
+      - name: Build installable debug APK
+        working-directory: native-project
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Prepare APK artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          cp native-project/app/build/outputs/apk/debug/app-debug.apk artifact/SamsungSmartRemote-v0.5.0-debug.apk
+          sha256sum artifact/SamsungSmartRemote-v0.5.0-debug.apk > artifact/SamsungSmartRemote-v0.5.0-debug.apk.sha256.txt
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SamsungSmartRemote-v0.5.0-APK
+          path: artifact/*
+          if-no-files-found: error
+          retention-days: 7
