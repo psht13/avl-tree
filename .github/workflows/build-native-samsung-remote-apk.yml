@@ -46,7 +46,12 @@ jobs:
             .build/native-samsung-remote-v0.5.0.part00.b64 \
             .build/native-samsung-remote-v0.5.0.part01-00.b64 \
             .build/native-samsung-remote-v0.5.0.part01-01.b64 \
-            .build/native-samsung-remote-v0.5.0.part01-02.b64 \
+            .build/native-samsung-remote-v0.5.0.part01-02-00.b64 \
+            .build/native-samsung-remote-v0.5.0.part01-02-01.b64 \
+            .build/native-samsung-remote-v0.5.0.part01-02-02.b64 \
+            .build/native-samsung-remote-v0.5.0.part01-02-03.b64 \
+            .build/native-samsung-remote-v0.5.0.part01-02-04.b64 \
+            .build/native-samsung-remote-v0.5.0.part01-02-05.b64 \
             .build/native-samsung-remote-v0.5.0.part01-03.b64 \
             .build/native-samsung-remote-v0.5.0.part01-04.b64 \
             .build/native-samsung-remote-v0.5.0.part01-05.b64 \
