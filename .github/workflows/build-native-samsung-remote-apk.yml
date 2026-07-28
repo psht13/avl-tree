@@ -66,6 +66,7 @@ jobs:
           echo "614dcdf6ad1fc7cbcf2a38e86ca223c5da9795907270172ff36c452876aec9bb  /tmp/native-project.tar.xz" | sha256sum --check -
           mkdir -p native-project
           tar -xJf /tmp/native-project.tar.xz -C native-project
+          sed -i 's/WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);/WebView.setWebContentsDebuggingEnabled(true);/' native-project/app/src/main/java/com/paul/samsungcursorremote/MainActivity.java
 
       - name: Build installable debug APK
         working-directory: native-project
