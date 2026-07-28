@@ -42,7 +42,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .build/native-samsung-remote-v0.5.0.part*.b64 > /tmp/native-project.tar.xz.b64
+          cat \
+            .build/native-samsung-remote-v0.5.0.part00.b64 \
+            .build/native-samsung-remote-v0.5.0.part01-00.b64 \
+            .build/native-samsung-remote-v0.5.0.part01-01.b64 \
+            .build/native-samsung-remote-v0.5.0.part01-02.b64 \
+            .build/native-samsung-remote-v0.5.0.part01-03.b64 \
+            .build/native-samsung-remote-v0.5.0.part01-04.b64 \
+            .build/native-samsung-remote-v0.5.0.part01-05.b64 \
+            .build/native-samsung-remote-v0.5.0.part02.b64 \
+            > /tmp/native-project.tar.xz.b64
           base64 --decode /tmp/native-project.tar.xz.b64 > /tmp/native-project.tar.xz
           echo "614dcdf6ad1fc7cbcf2a38e86ca223c5da9795907270172ff36c452876aec9bb  /tmp/native-project.tar.xz" | sha256sum --check -
           mkdir -p native-project
