@@ -1,0 +1,174 @@
+name: Build Smart TV Remote v0.6.1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".build/smart-tv-remote-v0.6.1.part*.b64"
+      - ".github/workflows/build-smart-tv-remote-v0.6.1.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CI: "1"
+      CGO_ENABLED: "0"
+      APP_VERSION: "0.6.1"
+      ANDROID_NDK_VERSION: "27.1.12297006"
+
+    steps:
+      - name: Checkout temporary build branch
+        uses: actions/checkout@v4
+
+      - name: Set up current stable Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Install Android, NDK and protobuf tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler zip unzip
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;${ANDROID_NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Restore and verify source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            .build/smart-tv-remote-v0.6.1.part00.b64 \
+            .build/smart-tv-remote-v0.6.1.part01.b64 \
+            .build/smart-tv-remote-v0.6.1.part02.b64 \
+            .build/smart-tv-remote-v0.6.1.part03.b64 \
+            .build/smart-tv-remote-v0.6.1.part04.b64 \
+            .build/smart-tv-remote-v0.6.1.part05.b64 \
+            .build/smart-tv-remote-v0.6.1.part06-00.b64 \
+            .build/smart-tv-remote-v0.6.1.part06-01.b64 \
+            .build/smart-tv-remote-v0.6.1.part06-02.b64 \
+            .build/smart-tv-remote-v0.6.1.part06-03.b64 \
+            .build/smart-tv-remote-v0.6.1.part06-04.b64 \
+            .build/smart-tv-remote-v0.6.1.part06-05.b64 \
+            .build/smart-tv-remote-v0.6.1.part06-06.b64 \
+            .build/smart-tv-remote-v0.6.1.part06-07.b64 \
+            .build/smart-tv-remote-v0.6.1.part07.b64 \
+            > /tmp/smart-tv-remote-v0.6.1.tar.xz.b64
+          echo "cb15d9cb0fda1123623cc5834e759edb565b28c166f0f67d69cccb377079218e  /tmp/smart-tv-remote-v0.6.1.tar.xz.b64" | sha256sum --check -
+          base64 --decode /tmp/smart-tv-remote-v0.6.1.tar.xz.b64 > /tmp/smart-tv-remote-v0.6.1.tar.xz
+          echo "ef21bb8cca005f0c4ac69605c26736ffd87681f029911b680b32aabe72597d2a  /tmp/smart-tv-remote-v0.6.1.tar.xz" | sha256sum --check -
+          mkdir -p smart-tv-remote
+          tar -xJf /tmp/smart-tv-remote-v0.6.1.tar.xz -C smart-tv-remote
+
+      - name: Generate Google TV protobuf bindings
+        working-directory: smart-tv-remote
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p remoteapp/internal/googleproto
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/tronikos/androidtvremote2/70dc3e2791581873e5b1470cbe6d540f27537c9f/src/androidtvremote2/remotemessage.proto \
+            -o remoteapp/internal/googleproto/remotemessage.proto
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.10
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          cd remoteapp/internal/googleproto
+          protoc \
+            --go_out=. \
+            --go_opt=paths=source_relative \
+            --go_opt=Mremotemessage.proto=smarttvremote/remoteapp/internal/googleproto \
+            remotemessage.proto
+          test -s remotemessage.pb.go
+
+      - name: Download dependencies and run tests
+        working-directory: smart-tv-remote
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod tidy
+          go test ./...
+          go vet ./...
+
+      - name: Build Windows x64 EXE
+        working-directory: smart-tv-remote
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../artifact
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
+            -trimpath \
+            -ldflags="-s -w -H=windowsgui" \
+            -o ../artifact/SmartTVRemote-v0.6.1-Windows-x64.exe \
+            ./cmd/windows
+
+      - name: Build Android bridge AAR
+        working-directory: smart-tv-remote
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile init
+          mkdir -p android/app/libs
+          gomobile bind \
+            -target=android \
+            -androidapi=23 \
+            -javapkg=com.paul.remote \
+            -o android/app/libs/mobilebridge.aar \
+            ./mobilebridge
+          test -s android/app/libs/mobilebridge.aar
+
+      - name: Build installable Android APK
+        working-directory: smart-tv-remote/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace :app:assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk ../../artifact/SmartTVRemote-v0.6.1-debug.apk
+
+      - name: Validate and package outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          file artifact/SmartTVRemote-v0.6.1-Windows-x64.exe
+          unzip -t artifact/SmartTVRemote-v0.6.1-debug.apk
+          "${ANDROID_SDK_ROOT}/build-tools/35.0.0/apksigner" verify --verbose artifact/SmartTVRemote-v0.6.1-debug.apk
+          sha256sum \
+            artifact/SmartTVRemote-v0.6.1-Windows-x64.exe \
+            artifact/SmartTVRemote-v0.6.1-debug.apk \
+            > artifact/SHA256SUMS.txt
+          cp smart-tv-remote/README.md artifact/README.md
+          cp smart-tv-remote/THIRD_PARTY_NOTICES.md artifact/THIRD_PARTY_NOTICES.md
+          cd artifact
+          zip -9 SmartTVRemote-v0.6.1-Windows-x64.zip SmartTVRemote-v0.6.1-Windows-x64.exe README.md THIRD_PARTY_NOTICES.md SHA256SUMS.txt
+          zip -9 SmartTVRemote-v0.6.1-Android.zip SmartTVRemote-v0.6.1-debug.apk README.md THIRD_PARTY_NOTICES.md SHA256SUMS.txt
+
+      - name: Upload APK and EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartTVRemote-v0.6.1-builds
+          path: artifact/*
+          if-no-files-found: error
+          retention-days: 7
