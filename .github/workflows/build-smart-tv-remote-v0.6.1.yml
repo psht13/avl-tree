@@ -81,6 +81,15 @@ jobs:
           echo "ef21bb8cca005f0c4ac69605c26736ffd87681f029911b680b32aabe72597d2a  /tmp/smart-tv-remote-v0.6.1.tar.xz" | sha256sum --check -
           mkdir -p smart-tv-remote
           tar -xJf /tmp/smart-tv-remote-v0.6.1.tar.xz -C smart-tv-remote
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("smart-tv-remote/remoteapp/samsung.go")
+          source = path.read_text()
+          if '"net/http"' not in source:
+              source = source.replace('\t"net"\n', '\t"net"\n\t"net/http"\n', 1)
+              path.write_text(source)
+          PY
+          gofmt -w smart-tv-remote/remoteapp/samsung.go
 
       - name: Generate Google TV protobuf bindings
         working-directory: smart-tv-remote
