@@ -137,12 +137,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export PATH="$(go env GOPATH)/bin:$PATH"
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          go install golang.org/x/mobile/cmd/gobind@latest
-          gomobile init
+          go get -tool golang.org/x/mobile/cmd/gomobile@latest
+          go get -tool golang.org/x/mobile/cmd/gobind@latest
+          go tool gomobile init
           mkdir -p android/app/libs
-          gomobile bind \
+          go tool gomobile bind \
             -target=android \
             -androidapi=23 \
             -javapkg=com.paul.remote \
