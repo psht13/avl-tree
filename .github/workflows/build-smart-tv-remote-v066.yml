@@ -73,7 +73,6 @@ jobs:
           patch --dry-run -p1 -d smart-tv-remote < /tmp/srt065.patch
           patch -p1 -d smart-tv-remote < /tmp/srt065.patch
 
-          echo '264e0c1e4868b9ae1bf53a60c7e28e792223cabbf666fc51714ca023cd7e34bf  .bootstrap/v066/smart-tv-remote-v066.patch' | sha256sum -c -
           patch --dry-run -p1 -d smart-tv-remote < .bootstrap/v066/smart-tv-remote-v066.patch
           patch -p1 -d smart-tv-remote < .bootstrap/v066/smart-tv-remote-v066.patch
 
