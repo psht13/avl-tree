@@ -73,8 +73,12 @@ jobs:
           patch --dry-run -p1 -d smart-tv-remote < /tmp/srt065.patch
           patch -p1 -d smart-tv-remote < /tmp/srt065.patch
 
-          patch --dry-run -p1 -d smart-tv-remote < .bootstrap/v066/smart-tv-remote-v066.patch
-          patch -p1 -d smart-tv-remote < .bootstrap/v066/smart-tv-remote-v066.patch
+          cat .bootstrap/v066/patch.b64.part* > /tmp/srt066.patch.gz.b64
+          echo '2ebba9fbaddc1366d150fa307c414727613a579bc7aee04f06462a4f056f14a8  /tmp/srt066.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/srt066.patch.gz.b64 | gzip -dc > /tmp/srt066.patch
+          echo '264e0c1e4868b9ae1bf53a60c7e28e792223cabbf666fc51714ca023cd7e34bf  /tmp/srt066.patch' | sha256sum -c -
+          patch --dry-run -p1 -d smart-tv-remote < /tmp/srt066.patch
+          patch -p1 -d smart-tv-remote < /tmp/srt066.patch
 
           find smart-tv-remote -name '*.go' -type f -print0 | xargs -0 gofmt -w
 
