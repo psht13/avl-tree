@@ -80,6 +80,10 @@ jobs:
           patch --dry-run -p1 -d smart-tv-remote < /tmp/srt066.patch
           patch -p1 -d smart-tv-remote < /tmp/srt066.patch
 
+          echo '6abb7d2a5813df484f2cd6a20580b814a74f102ef6dd02ad99abbff04c7bb7c8  .bootstrap/v066/samsung-app-loop-fix.patch' | sha256sum -c -
+          patch --dry-run -p1 -d smart-tv-remote < .bootstrap/v066/samsung-app-loop-fix.patch
+          patch -p1 -d smart-tv-remote < .bootstrap/v066/samsung-app-loop-fix.patch
+
           find smart-tv-remote -name '*.go' -type f -print0 | xargs -0 gofmt -w
 
           grep -F 'appVersion      = "0.6.6"' smart-tv-remote/remoteapp/app.go
