@@ -79,7 +79,7 @@ jobs:
           grep -F 'versionName "0.6.5"' smart-tv-remote/android/app/build.gradle
           grep -F 'scheduleSamsungReconnect' smart-tv-remote/remoteapp/samsung_reconnect.go
           grep -F 'LaunchAppControl' smart-tv-remote/remoteapp/samsung.go
-          grep -F 'samsungHTTPApplicationRequest' smart-tv-remote/remoteapp/samsung_http.go
+          grep -F 'func samsungRESTRequest' smart-tv-remote/remoteapp/samsung_http.go
           grep -F '.netflix-logo, .netflix-logo-inline' smart-tv-remote/remoteapp/web/index.html
           grep -F '.playstation-logo, .playstation-logo-inline' smart-tv-remote/remoteapp/web/index.html
           grep -F 'PackageName: "atvremote"' smart-tv-remote/remoteapp/google.go
