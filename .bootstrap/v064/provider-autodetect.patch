@@ -1,0 +1,336 @@
+diff -ruN a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -1,4 +1,4 @@
+-# Smart TV Remote 0.6.3
++# Smart TV Remote 0.6.4
+ 
+ Local Wi-Fi remote for:
+ 
+@@ -7,7 +7,7 @@
+ 
+ The Android app and Windows tester use the same local controller and responsive interface. No companion app is installed on the television.
+ 
+-## Fixes in 0.6.3
++## Fixes in 0.6.4
+ 
+ - Fixed oversized inline Netflix and PlayStation logos in the mobile layout.
+ - Reworked the Google TV Remote Service v2 startup sequence to wait for the TV configuration, negotiate only supported features, answer the active-feature request, and report a connection only after `remote_start`.
+@@ -25,6 +25,12 @@
+ - The UI reports `opened` only after confirmation. Otherwise it shows that launch attempts were sent instead of claiming success.
+ - Android builds now use a stable test signing key so future 0.6.x test updates can be installed over 0.6.2.
+ 
++
++- The selected platform is now verified against the TV ports before connecting. If a Thomson / Google TV IP is entered while Samsung is selected, the app automatically switches to Google TV instead of trying Samsung ports 8001/8002.
++- Saved auto-connect also probes both protocol families, preventing a stale Samsung selection from being reused for a Google TV.
++- The connection screen refreshes the effective platform before showing the connection hint.
++- The displayed app version is updated from the runtime state instead of remaining stuck on 0.6.2.
++
+ ## Google TV first connection after upgrading
+ 
+ 1. Uninstall an older test APK if Android reports a signature conflict.
+diff -ruN a/android/app/build.gradle b/android/app/build.gradle
+--- a/android/app/build.gradle
++++ b/android/app/build.gradle
+@@ -10,8 +10,8 @@
+         applicationId "com.paul.smarttvremote"
+         minSdk 23
+         targetSdk 35
+-        versionCode 9
+-        versionName "0.6.3"
++        versionCode 10
++        versionName "0.6.4"
+     }
+ 
+     signingConfigs {
+diff -ruN a/android/app/src/main/java/com/paul/smarttvremote/MainActivity.java b/android/app/src/main/java/com/paul/smarttvremote/MainActivity.java
+--- a/android/app/src/main/java/com/paul/smarttvremote/MainActivity.java
++++ b/android/app/src/main/java/com/paul/smarttvremote/MainActivity.java
+@@ -46,7 +46,7 @@
+         settings.setAllowContentAccess(false);
+         settings.setMediaPlaybackRequiresUserGesture(false);
+         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+-        settings.setUserAgentString(settings.getUserAgentString() + " SmartTVRemote/0.6.3");
++        settings.setUserAgentString(settings.getUserAgentString() + " SmartTVRemote/0.6.4");
+ 
+         webView.setWebViewClient(new WebViewClient());
+         webView.setWebChromeClient(new WebChromeClient());
+diff -ruN a/remoteapp/app.go b/remoteapp/app.go
+--- a/remoteapp/app.go
++++ b/remoteapp/app.go
+@@ -17,7 +17,7 @@
+ 
+ const (
+ 	appName         = "Smart TV Remote"
+-	appVersion      = "0.6.3"
++	appVersion      = "0.6.4"
+ 	ProviderSamsung = "samsung"
+ 	ProviderGoogle  = "google"
+ )
+@@ -333,19 +333,41 @@
+ }
+ 
+ func (a *App) connectAsync(provider, ip string) {
+-	if provider != "" {
+-		if err := a.SetProvider(provider); err != nil {
+-			a.setError(err.Error())
+-			return
+-		}
+-	}
+-	a.stopControlModeMonitor()
+ 	ip = normalizeIP(ip)
+ 	if net.ParseIP(ip) == nil {
+ 		a.setError("Некоректна IP-адреса.")
+ 		return
+ 	}
+ 
++	a.mu.RLock()
++	currentProvider := a.cfg.Provider
++	a.mu.RUnlock()
++	if provider != ProviderSamsung && provider != ProviderGoogle {
++		provider = currentProvider
++	}
++	if provider != ProviderSamsung && provider != ProviderGoogle {
++		provider = ProviderSamsung
++	}
++
++	reachability := probeProviderReachability(ip, 650*time.Millisecond)
++	detectedProvider := resolveProviderByReachability(provider, reachability)
++	if detectedProvider != provider {
++		if detectedProvider == ProviderGoogle {
++			a.addLog(fmt.Sprintf("IP %s відповідає як Thomson / Google TV на портах 6466/6467. Автоматично перемикаю платформу замість Samsung 8001/8002.", ip))
++		} else {
++			a.addLog(fmt.Sprintf("IP %s відповідає як Samsung Tizen на портах 8001/8002. Автоматично перемикаю платформу замість Google TV.", ip))
++		}
++		provider = detectedProvider
++	} else if !reachability.Samsung && !reachability.Google {
++		a.addLog("Не вдалося визначити платформу за відкритими портами. Пробую вибраний тип TV: " + providerLabel(provider) + ".")
++	}
++
++	if err := a.SetProvider(provider); err != nil {
++		a.setError(err.Error())
++		return
++	}
++	a.stopControlModeMonitor()
++
+ 	a.mu.Lock()
+ 	if a.connecting {
+ 		a.mu.Unlock()
+@@ -353,9 +375,8 @@
+ 	}
+ 	a.connecting = true
+ 	a.status = "connecting"
+-	a.message = "Підключення до " + ip + "…"
++	a.message = "Підключення до " + providerLabel(provider) + " " + ip + "…"
+ 	a.pairingRequired = false
+-	provider = a.cfg.Provider
+ 	active := a.activeConfigLocked()
+ 	old := *active
+ 	active.IP = ip
+@@ -506,11 +527,8 @@
+ 	}
+ 	go func() {
+ 		a.addLog("Пробую збережену адресу " + cfg.IP + ".")
+-		reachable := canReachSamsung(cfg.IP, 900*time.Millisecond)
+-		if provider == ProviderGoogle {
+-			reachable = canReachGoogleTV(cfg.IP, 900*time.Millisecond)
+-		}
+-		if reachable {
++		reachability := probeProviderReachability(cfg.IP, 900*time.Millisecond)
++		if reachability.Samsung || reachability.Google {
+ 			a.connectAsync(provider, cfg.IP)
+ 			return
+ 		}
+@@ -525,7 +543,11 @@
+ 			a.setError("Збережений TV не знайдено. Перевір Wi-Fi або введи IP вручну.")
+ 			return
+ 		}
+-		a.connectAsync(provider, selected.IP)
++		selectedProvider := provider
++		if selected.Provider == ProviderSamsung || selected.Provider == ProviderGoogle {
++			selectedProvider = selected.Provider
++		}
++		a.connectAsync(selectedProvider, selected.IP)
+ 	}()
+ }
+ 
+@@ -579,7 +601,11 @@
+ 	active.ModelName = firstNonEmpty(selected.ModelName, selected.Model, active.ModelName)
+ 	a.mu.Unlock()
+ 	_ = a.saveConfig()
+-	a.connectAsync(provider, selected.IP)
++	selectedProvider := provider
++	if selected.Provider == ProviderSamsung || selected.Provider == ProviderGoogle {
++		selectedProvider = selected.Provider
++	}
++	a.connectAsync(selectedProvider, selected.IP)
+ 	return selected, nil
+ }
+ 
+diff -ruN a/remoteapp/discovery.go b/remoteapp/discovery.go
+--- a/remoteapp/discovery.go
++++ b/remoteapp/discovery.go
+@@ -25,9 +25,33 @@
+ 	OS          string `json:"os,omitempty"`
+ }
+ 
++func canReachTCPPort(ip, port string, timeout time.Duration) bool {
++	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), timeout)
++	if err != nil {
++		return false
++	}
++	_ = conn.Close()
++	return true
++}
++
++func canReachAnyTCPPort(ip string, ports []string, timeout time.Duration) bool {
++	results := make(chan bool, len(ports))
++	for _, port := range ports {
++		port := port
++		go func() {
++			results <- canReachTCPPort(ip, port, timeout)
++		}()
++	}
++	for range ports {
++		if <-results {
++			return true
++		}
++	}
++	return false
++}
++
+ func canReachSamsung(ip string, timeout time.Duration) bool {
+-	info, _ := fetchSamsungDeviceInfo(ip, timeout)
+-	return info != nil
++	return canReachAnyTCPPort(ip, []string{"8002", "8001"}, timeout)
+ }
+ 
+ func fetchSamsungDeviceInfo(ip string, timeout time.Duration) (*DeviceInfo, error) {
+@@ -80,14 +104,37 @@
+ }
+ 
+ func canReachGoogleTV(ip string, timeout time.Duration) bool {
+-	for _, port := range []string{"6466", "6467"} {
+-		conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), timeout)
+-		if err == nil {
+-			_ = conn.Close()
+-			return true
++	return canReachAnyTCPPort(ip, []string{"6466", "6467"}, timeout)
++}
++
++type providerReachability struct {
++	Samsung bool
++	Google  bool
++}
++
++func probeProviderReachability(ip string, timeout time.Duration) providerReachability {
++	samsungResult := make(chan bool, 1)
++	googleResult := make(chan bool, 1)
++	go func() { samsungResult <- canReachSamsung(ip, timeout) }()
++	go func() { googleResult <- canReachGoogleTV(ip, timeout) }()
++	return providerReachability{
++		Samsung: <-samsungResult,
++		Google:  <-googleResult,
++	}
++}
++
++func resolveProviderByReachability(requested string, reachability providerReachability) string {
++	switch {
++	case reachability.Google && !reachability.Samsung:
++		return ProviderGoogle
++	case reachability.Samsung && !reachability.Google:
++		return ProviderSamsung
++	default:
++		if requested == ProviderGoogle {
++			return ProviderGoogle
+ 		}
++		return ProviderSamsung
+ 	}
+-	return false
+ }
+ 
+ func discoverGoogleTVs() ([]DeviceInfo, error) {
+diff -ruN a/remoteapp/provider_detection_test.go b/remoteapp/provider_detection_test.go
+--- a/remoteapp/provider_detection_test.go
++++ b/remoteapp/provider_detection_test.go
+@@ -0,0 +1,27 @@
++package remoteapp
++
++import "testing"
++
++func TestResolveProviderByReachability(t *testing.T) {
++	t.Parallel()
++	tests := []struct {
++		name      string
++		requested string
++		reach     providerReachability
++		want      string
++	}{
++		{name: "google overrides stale samsung", requested: ProviderSamsung, reach: providerReachability{Google: true}, want: ProviderGoogle},
++		{name: "samsung overrides stale google", requested: ProviderGoogle, reach: providerReachability{Samsung: true}, want: ProviderSamsung},
++		{name: "both preserve google", requested: ProviderGoogle, reach: providerReachability{Samsung: true, Google: true}, want: ProviderGoogle},
++		{name: "both preserve samsung", requested: ProviderSamsung, reach: providerReachability{Samsung: true, Google: true}, want: ProviderSamsung},
++		{name: "neither preserves google", requested: ProviderGoogle, reach: providerReachability{}, want: ProviderGoogle},
++		{name: "invalid falls back samsung", requested: "", reach: providerReachability{}, want: ProviderSamsung},
++	}
++	for _, test := range tests {
++		t.Run(test.name, func(t *testing.T) {
++			if got := resolveProviderByReachability(test.requested, test.reach); got != test.want {
++				t.Fatalf("resolveProviderByReachability() = %q, want %q", got, test.want)
++			}
++		})
++	}
++}
+diff -ruN a/remoteapp/web/index.html b/remoteapp/web/index.html
+--- a/remoteapp/web/index.html
++++ b/remoteapp/web/index.html
+@@ -544,7 +544,7 @@
+       <div class="brand-mark">TV</div>
+       <div class="header-copy">
+         <h1>Smart TV Remote</h1>
+-        <p class="subtitle">Samsung Tizen + Thomson / Google TV · версія 0.6.2</p>
++        <p class="subtitle">Samsung Tizen + Thomson / Google TV · версія <span id="appVersion">0.6.4</span></p>
+       </div>
+       <div id="statusPill" class="status-pill idle" title="Стан підключення">
+         <span class="status-dot"></span>
+@@ -557,7 +557,7 @@
+         <article class="card">
+           <div class="card-body">
+             <h2 class="card-title">Підключення</h2>
+-            <p class="card-copy">Телефон/ПК і TV мають бути в одній локальній мережі. Samsung підтверджується дозволом на екрані, а Google TV - одноразовим 6-символьним кодом.</p>
++            <p class="card-copy">Телефон/ПК і TV мають бути в одній локальній мережі. Після введення IP програма перевіряє порти й автоматично виправляє вибір Samsung або Google TV. Google TV підтверджується одноразовим 6-символьним кодом.</p>
+             <div class="provider-grid">
+               <select id="provider" aria-label="Платформа телевізора">
+                 <option value="samsung">Samsung Tizen</option>
+@@ -734,7 +734,7 @@
+         openKeyboard: $('openKeyboard'), openVoice: $('openVoice'), voiceCard: $('voiceCard'),
+         text: $('text'), focusText: $('focusText'), sendText: $('sendText'), voice: $('voice'), voiceStatus: $('voiceStatus'), speechLanguage: $('speechLanguage'),
+         playPause: $('playPause'), playPauseUse: $('playPauseUse'),
+-        disconnect: $('disconnect'), forget: $('forget'), pointerNote: $('pointerNote'), toast: $('toast')
++        disconnect: $('disconnect'), forget: $('forget'), pointerNote: $('pointerNote'), appVersion: $('appVersion'), toast: $('toast')
+       };
+ 
+       let state = { provider: 'samsung', connected: false, controlModeHint: 'unknown', autoModeSupported: false, pairingRequired: false, logs: [] };
+@@ -841,6 +841,7 @@
+         const status = state.status || 'idle';
+         elements.statusPill.className = `status-pill ${status}`;
+         elements.statusText.textContent = state.message || status;
++        if (elements.appVersion) elements.appVersion.textContent = state.version || '0.6.4';
+         if (lastRenderedProvider !== state.provider) {
+           lastRenderedProvider = state.provider;
+           elements.provider.value = state.provider || 'samsung';
+@@ -913,10 +914,10 @@
+         if (!ip) return showToast('Введи IP телевізора', true);
+         try {
+           await api('/api/connect', { provider: elements.provider.value, ip });
+-          showToast(elements.provider.value === 'google'
+-            ? 'Підключаюсь. Якщо TV ще не сполучений, на ньому з’явиться код.'
+-            : 'Підключення розпочато. Підтвердь запит на TV.');
+-          refreshState();
++          await refreshState();
++          showToast(state.provider === 'google'
++            ? 'Визначено Thomson / Google TV. Якщо TV ще не сполучений, на ньому з’явиться код.'
++            : 'Визначено Samsung Tizen. Підтвердь запит на TV, якщо він з’явиться.');
+         } catch (error) { showToast(error.message, true); }
+       });
+ 
