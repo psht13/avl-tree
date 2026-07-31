@@ -34,12 +34,18 @@ jobs:
             echo "Running ${script}"
             bash "${script}" smart-tv-remote
           done
-          test -s smart-tv-remote/go.mod
-          test -s smart-tv-remote/remoteapp/google.go
-          test -s smart-tv-remote/remoteapp/google_pairing.go
-          test -s smart-tv-remote/remoteapp/samsung_apps.go
-          test -s smart-tv-remote/remoteapp/web/index.html
-          test -s smart-tv-remote/android/app/smarttvremote-debug.keystore
+          for path in \
+            smart-tv-remote/go.mod \
+            smart-tv-remote/remoteapp/google.go \
+            smart-tv-remote/remoteapp/google_pairing.go \
+            smart-tv-remote/remoteapp/samsung_apps.go \
+            smart-tv-remote/remoteapp/web/index.html \
+            smart-tv-remote/android/app/build.gradle; do
+            if [[ ! -s "$path" ]]; then
+              echo "Missing reconstructed file: $path"
+              exit 1
+            fi
+          done
           grep -R 'appVersion.*0.6.2' smart-tv-remote/remoteapp/app.go
           grep -R 'versionName "0.6.2"' smart-tv-remote/android/app/build.gradle
           find smart-tv-remote -type f | sort
@@ -99,14 +105,14 @@ jobs:
         run: |
           set -euo pipefail
           go mod tidy
+          unformatted="$(gofmt -l $(find . -name '*.go' -type f))"
+          if [[ -n "$unformatted" ]]; then
+            echo "The following Go files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
           go test -race ./...
           go vet ./...
-          gofmt -w $(find . -name '*.go' -type f)
-          git diff --exit-code -- . ':!remoteapp/internal/googleproto/remotemessage.pb.go' || {
-            echo 'Go source was not gofmt-clean before build.'
-            git diff -- . ':!remoteapp/internal/googleproto/remotemessage.pb.go'
-            exit 1
-          }
 
       - name: Build Windows x64 EXE
         working-directory: smart-tv-remote
