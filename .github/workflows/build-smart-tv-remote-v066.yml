@@ -1,0 +1,271 @@
+name: Build Smart TV Remote v0.6.6
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".bootstrap/v062/**"
+      - ".bootstrap/v064/**"
+      - ".bootstrap/v065/**"
+      - ".bootstrap/v066/**"
+      - ".github/workflows/build-smart-tv-remote-v066.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    env:
+      APP_VERSION: "0.6.6"
+      ANDROID_NDK_VERSION: "27.1.12297006"
+      CGO_ENABLED: "0"
+
+    steps:
+      - name: Checkout temporary build branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct and patch source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf smart-tv-remote
+          mkdir -p smart-tv-remote
+          for script in .bootstrap/v062/bootstrap-group-*.sh; do
+            echo "Running ${script}"
+            bash "${script}" smart-tv-remote
+          done
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          server_path = Path('smart-tv-remote/remoteapp/server.go')
+          server_source = server_path.read_text(encoding='utf-8')
+          if 'staticFS, err := fs.Sub(webFS, "web")' in server_source and 'mux.Handle("/assets/", http.FileServer(http.FS(staticFS)))' not in server_source:
+              marker = '\tif err != nil {\n\t\tpanic(err)\n\t}\n'
+              if marker not in server_source:
+                  raise SystemExit('could not locate staticFS error block in server.go')
+              server_source = server_source.replace(
+                  marker,
+                  marker + '\tmux.Handle("/assets/", http.FileServer(http.FS(staticFS)))\n',
+                  1,
+              )
+              server_path.write_text(server_source, encoding='utf-8')
+
+          pairing_path = Path('smart-tv-remote/remoteapp/google_pairing.go')
+          pairing_source = pairing_path.read_text(encoding='utf-8')
+          old_import = 'apb "github.com/drosocode/atvremote/pkg/v2/proto"'
+          new_import = 'gp "smarttvremote/remoteapp/internal/googleproto"'
+          if old_import not in pairing_source:
+              raise SystemExit('could not locate old Google TV pairing protobuf import')
+          pairing_source = pairing_source.replace(old_import, new_import, 1).replace('apb.', 'gp.')
+          pairing_path.write_text(pairing_source, encoding='utf-8')
+          PY
+
+          patch -p1 -d smart-tv-remote < .bootstrap/v064/provider-autodetect.patch
+
+          cat .bootstrap/v065/patch.b64.part* > /tmp/srt065.patch.gz.b64
+          echo 'ba1e091ea6d538a3a42fd9b9b3af6a230c0926940b398ee501c0c7b129da70b7  /tmp/srt065.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/srt065.patch.gz.b64 | gzip -dc > /tmp/srt065.patch
+          echo 'baa5dc713e2bf723741368c3a41922a6dbdf0aeec26fe90283d5d5df718e252f  /tmp/srt065.patch' | sha256sum -c -
+          patch --dry-run -p1 -d smart-tv-remote < /tmp/srt065.patch
+          patch -p1 -d smart-tv-remote < /tmp/srt065.patch
+
+          echo '264e0c1e4868b9ae1bf53a60c7e28e792223cabbf666fc51714ca023cd7e34bf  .bootstrap/v066/smart-tv-remote-v066.patch' | sha256sum -c -
+          patch --dry-run -p1 -d smart-tv-remote < .bootstrap/v066/smart-tv-remote-v066.patch
+          patch -p1 -d smart-tv-remote < .bootstrap/v066/smart-tv-remote-v066.patch
+
+          find smart-tv-remote -name '*.go' -type f -print0 | xargs -0 gofmt -w
+
+          grep -F 'appVersion      = "0.6.6"' smart-tv-remote/remoteapp/app.go
+          grep -F 'versionCode 12' smart-tv-remote/android/app/build.gradle
+          grep -F 'versionName "0.6.6"' smart-tv-remote/android/app/build.gradle
+          grep -F 'ms.remote.imeStart' smart-tv-remote/remoteapp/samsung.go
+          grep -F 'sendTextREST' smart-tv-remote/remoteapp/samsung_http.go
+          grep -F 'CommandSent bool' smart-tv-remote/remoteapp/launch.go
+          grep -F 'for attempt := 0; attempt < 20; attempt++' smart-tv-remote/remoteapp/samsung_reconnect.go
+          grep -F 'writeConfigAtomically' smart-tv-remote/remoteapp/app.go
+          grep -F '.netflix-logo, .netflix-logo-inline' smart-tv-remote/remoteapp/web/index.html
+          grep -F '.playstation-logo, .playstation-logo-inline' smart-tv-remote/remoteapp/web/index.html
+          grep -F 'PackageName: "atvremote"' smart-tv-remote/remoteapp/google.go
+          grep -F 'mux.Handle("/assets/", http.FileServer(http.FS(staticFS)))' smart-tv-remote/remoteapp/server.go
+          grep -F 'smarttvremote/remoteapp/internal/googleproto' smart-tv-remote/remoteapp/google_pairing.go
+          if grep -R 'github.com/drosocode/atvremote/pkg/v2/proto' smart-tv-remote --include='*.go'; then
+            echo 'Old duplicate Google TV protobuf import is still present.'
+            exit 1
+          fi
+
+      - name: Set up current stable Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Install Android and protobuf tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler zip unzip file patch
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;${ANDROID_NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Generate Google TV protobuf bindings
+        working-directory: smart-tv-remote
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p remoteapp/internal/googleproto
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/tronikos/androidtvremote2/70dc3e2791581873e5b1470cbe6d540f27537c9f/src/androidtvremote2/remotemessage.proto \
+            -o remoteapp/internal/googleproto/remotemessage.proto
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/drosoCode/atvremote/967d9ff8e74cae4b5cb149696f7a05ceb0a128c4/pkg/v2/proto/pairingmessage.proto \
+            -o remoteapp/internal/googleproto/pairingmessage.proto
+          sed -i 's#option go_package = "github.com/drosocode/atvremote/pkg/v2/proto";#option go_package = "smarttvremote/remoteapp/internal/googleproto";#' \
+            remoteapp/internal/googleproto/pairingmessage.proto
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.10
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          cd remoteapp/internal/googleproto
+          protoc \
+            --go_out=. \
+            --go_opt=paths=source_relative \
+            --go_opt=Mpairingmessage.proto=smarttvremote/remoteapp/internal/googleproto \
+            --go_opt=Mremotemessage.proto=smarttvremote/remoteapp/internal/googleproto \
+            pairingmessage.proto remotemessage.proto
+          test -s pairingmessage.pb.go
+          test -s remotemessage.pb.go
+
+      - name: Resolve dependencies and validate code
+        working-directory: smart-tv-remote
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod tidy
+          if grep -F 'github.com/drosocode/atvremote' go.mod go.sum 2>/dev/null; then
+            echo 'Obsolete duplicate protobuf dependency remains after go mod tidy.'
+            exit 1
+          fi
+          unformatted="$(gofmt -l $(find . -name '*.go' -type f))"
+          if [[ -n "$unformatted" ]]; then
+            echo "The following Go files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+          CGO_ENABLED=1 go test -race ./...
+          CGO_ENABLED=1 go vet ./...
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          html = Path('remoteapp/web/index.html').read_text(encoding='utf-8')
+          scripts = re.findall(r'<script>(.*?)</script>', html, re.S)
+          if len(scripts) != 1:
+              raise SystemExit(f'expected one inline script, found {len(scripts)}')
+          Path('/tmp/smart-tv-remote-ui.js').write_text(scripts[0], encoding='utf-8')
+          PY
+          node --check /tmp/smart-tv-remote-ui.js
+
+      - name: Build Windows x64 EXE
+        working-directory: smart-tv-remote
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../artifact
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
+            -trimpath \
+            -ldflags="-s -w -H=windowsgui" \
+            -o "../artifact/SmartTVRemote-v${APP_VERSION}-Windows-x64.exe" \
+            ./cmd/windows
+          test -s "../artifact/SmartTVRemote-v${APP_VERSION}-Windows-x64.exe"
+
+      - name: Build Android bridge AAR
+        working-directory: smart-tv-remote
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile init
+          mkdir -p android/app/libs
+          gomobile bind \
+            -target=android \
+            -androidapi=23 \
+            -javapkg=com.paul.remote \
+            -o android/app/libs/mobilebridge.aar \
+            ./mobilebridge
+          test -s android/app/libs/mobilebridge.aar
+          unzip -t android/app/libs/mobilebridge.aar
+
+      - name: Build installable Android APK
+        working-directory: smart-tv-remote/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace :app:assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk "../../artifact/SmartTVRemote-v${APP_VERSION}-debug.apk"
+          test -s "../../artifact/SmartTVRemote-v${APP_VERSION}-debug.apk"
+
+      - name: Validate binaries and package downloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe="artifact/SmartTVRemote-v${APP_VERSION}-Windows-x64.exe"
+          apk="artifact/SmartTVRemote-v${APP_VERSION}-debug.apk"
+          checksums="artifact/SmartTVRemote-v${APP_VERSION}-SHA256.txt"
+
+          file "$exe" | tee artifact/WINDOWS-FILE-TYPE.txt
+          file "$apk" | tee artifact/APK-FILE-TYPE.txt
+          unzip -t "$apk"
+          "${ANDROID_SDK_ROOT}/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$apk" | tee artifact/APK-SIGNATURE.txt
+          "${ANDROID_SDK_ROOT}/build-tools/35.0.0/aapt" dump badging "$apk" | tee artifact/APK-BADGING.txt
+          grep -F "package: name='com.paul.smarttvremote' versionCode='12' versionName='0.6.6'" artifact/APK-BADGING.txt
+
+          sha256sum "$exe" "$apk" > "$checksums"
+          cp smart-tv-remote/README.md artifact/README.md
+          cp smart-tv-remote/THIRD_PARTY_NOTICES.md artifact/THIRD_PARTY_NOTICES.md
+          tar \
+            --exclude='./android/.gradle' \
+            --exclude='./android/app/build' \
+            --exclude='./android/app/libs/mobilebridge.aar' \
+            -cJf "artifact/SmartTVRemote-v${APP_VERSION}-source.tar.xz" \
+            -C smart-tv-remote .
+          sha256sum "artifact/SmartTVRemote-v${APP_VERSION}-source.tar.xz" >> "$checksums"
+
+          cd artifact
+          zip -9 "SmartTVRemote-v${APP_VERSION}-Windows-x64.zip" \
+            "SmartTVRemote-v${APP_VERSION}-Windows-x64.exe" \
+            README.md THIRD_PARTY_NOTICES.md \
+            "SmartTVRemote-v${APP_VERSION}-SHA256.txt" WINDOWS-FILE-TYPE.txt
+          zip -9 "SmartTVRemote-v${APP_VERSION}-Android.zip" \
+            "SmartTVRemote-v${APP_VERSION}-debug.apk" \
+            README.md THIRD_PARTY_NOTICES.md \
+            "SmartTVRemote-v${APP_VERSION}-SHA256.txt" \
+            APK-FILE-TYPE.txt APK-SIGNATURE.txt APK-BADGING.txt
+          unzip -t "SmartTVRemote-v${APP_VERSION}-Windows-x64.zip"
+          unzip -t "SmartTVRemote-v${APP_VERSION}-Android.zip"
+
+      - name: Upload APK, EXE and reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartTVRemote-v0.6.6-builds
+          path: artifact/*
+          if-no-files-found: error
+          retention-days: 7
