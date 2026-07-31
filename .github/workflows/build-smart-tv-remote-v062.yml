@@ -36,15 +36,26 @@ jobs:
           done
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('smart-tv-remote/remoteapp/server.go')
-          source = path.read_text(encoding='utf-8')
-          if 'staticFS, err := fs.Sub(webFS, "web")' in source and 'mux.Handle("/assets/", http.FileServer(http.FS(staticFS)))' not in source:
+
+          server_path = Path('smart-tv-remote/remoteapp/server.go')
+          server_source = server_path.read_text(encoding='utf-8')
+          if 'staticFS, err := fs.Sub(webFS, "web")' in server_source and 'mux.Handle("/assets/", http.FileServer(http.FS(staticFS)))' not in server_source:
               marker = '\tif err != nil {\n\t\tpanic(err)\n\t}\n'
-              if marker not in source:
+              if marker not in server_source:
                   raise SystemExit('could not locate staticFS error block in server.go')
-              source = source.replace(marker, marker + '\tmux.Handle("/assets/", http.FileServer(http.FS(staticFS)))\n', 1)
-              path.write_text(source, encoding='utf-8')
+              server_source = server_source.replace(marker, marker + '\tmux.Handle("/assets/", http.FileServer(http.FS(staticFS)))\n', 1)
+              server_path.write_text(server_source, encoding='utf-8')
+
+          pairing_path = Path('smart-tv-remote/remoteapp/google_pairing.go')
+          pairing_source = pairing_path.read_text(encoding='utf-8')
+          old_import = 'apb "github.com/drosocode/atvremote/pkg/v2/proto"'
+          new_import = 'gp "smarttvremote/remoteapp/internal/googleproto"'
+          if old_import not in pairing_source:
+              raise SystemExit('could not locate old Google TV pairing protobuf import')
+          pairing_source = pairing_source.replace(old_import, new_import, 1).replace('apb.', 'gp.')
+          pairing_path.write_text(pairing_source, encoding='utf-8')
           PY
+          gofmt -w smart-tv-remote/remoteapp/google_pairing.go smart-tv-remote/remoteapp/server.go
           for path in \
             smart-tv-remote/go.mod \
             smart-tv-remote/remoteapp/google.go \
@@ -60,6 +71,11 @@ jobs:
           grep -R 'appVersion.*0.6.2' smart-tv-remote/remoteapp/app.go
           grep -R 'versionName "0.6.2"' smart-tv-remote/android/app/build.gradle
           grep -F 'mux.Handle("/assets/", http.FileServer(http.FS(staticFS)))' smart-tv-remote/remoteapp/server.go
+          grep -F 'smarttvremote/remoteapp/internal/googleproto' smart-tv-remote/remoteapp/google_pairing.go
+          if grep -R 'github.com/drosocode/atvremote/pkg/v2/proto' smart-tv-remote --include='*.go'; then
+            echo 'Old duplicate Google TV protobuf import is still present.'
+            exit 1
+          fi
           find smart-tv-remote -type f | sort
 
       - name: Set up current stable Go
@@ -101,14 +117,21 @@ jobs:
           curl --fail --location --retry 3 \
             https://raw.githubusercontent.com/tronikos/androidtvremote2/70dc3e2791581873e5b1470cbe6d540f27537c9f/src/androidtvremote2/remotemessage.proto \
             -o remoteapp/internal/googleproto/remotemessage.proto
+          curl --fail --location --retry 3 \
+            https://raw.githubusercontent.com/drosoCode/atvremote/967d9ff8e74cae4b5cb149696f7a05ceb0a128c4/pkg/v2/proto/pairingmessage.proto \
+            -o remoteapp/internal/googleproto/pairingmessage.proto
+          sed -i 's#option go_package = "github.com/drosocode/atvremote/pkg/v2/proto";#option go_package = "smarttvremote/remoteapp/internal/googleproto";#' \
+            remoteapp/internal/googleproto/pairingmessage.proto
           go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.10
           export PATH="$(go env GOPATH)/bin:$PATH"
           cd remoteapp/internal/googleproto
           protoc \
             --go_out=. \
             --go_opt=paths=source_relative \
+            --go_opt=Mpairingmessage.proto=smarttvremote/remoteapp/internal/googleproto \
             --go_opt=Mremotemessage.proto=smarttvremote/remoteapp/internal/googleproto \
-            remotemessage.proto
+            pairingmessage.proto remotemessage.proto
+          test -s pairingmessage.pb.go
           test -s remotemessage.pb.go
 
       - name: Resolve dependencies and validate code
@@ -117,6 +140,10 @@ jobs:
         run: |
           set -euo pipefail
           go mod tidy
+          if grep -F 'github.com/drosocode/atvremote' go.mod go.sum 2>/dev/null; then
+            echo 'Obsolete duplicate protobuf dependency remains after go mod tidy.'
+            exit 1
+          fi
           unformatted="$(gofmt -l $(find . -name '*.go' -type f))"
           if [[ -n "$unformatted" ]]; then
             echo "The following Go files are not gofmt-clean:"
