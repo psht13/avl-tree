@@ -1,0 +1,878 @@
+diff -ruN srt065src/README.md srt066src/README.md
+--- srt065src/README.md	2026-07-31 17:49:05.000000000 +0000
++++ srt066src/README.md	2026-07-31 21:12:36.851299414 +0000
+@@ -1,4 +1,4 @@
+-# Smart TV Remote 0.6.5
++# Smart TV Remote 0.6.6
+ 
+ Local Wi-Fi remote for:
+ 
+@@ -7,16 +7,19 @@
+ 
+ The Android app and Windows tester use the same local controller and responsive interface. No companion app is installed on the television.
+ 
+-## Fixes in 0.6.5
++## Fixes in 0.6.6
+ 
+-- Samsung authorization tokens are now read as either strings or numbers and are also found in nested connection responses. Some Tizen models return a numeric token, which older builds silently discarded and therefore requested approval again after a restart.
+-- Samsung TVs with token authentication stay on the secure port 8002 instead of falling back to port 8001, where persistent authorization is not available on newer models.
+-- Added WebSocket ping keepalive, correct close-frame handling and session-safe cleanup so a dead socket is never shown as connected.
+-- Added automatic reconnection after switching to HDMI, opening an application, temporary Wi-Fi interruption or waking the TV. The saved token is retained while the TV is off.
+-- Reconnection stops after a genuine authorization rejection, preventing an endless loop of approval popups. A manual Connect then requests a new token once.
+-- Samsung YouTube, Netflix and Internet launch now try the installed app ID, modern and legacy Tizen IDs, the remote channel, the separate app-control WebSocket, REST and remote-key fallbacks. DIAL is only the final fallback and is no longer treated as success without a visible app-state confirmation.
+-- Added the modern YouTube ID `9Ur5IzDKqV.TizenYouTube` and the native Samsung Browser launch form `org.tizen.browser` with a URL meta tag.
+-- Samsung REST information and app-state checks now work on both HTTP 8001 and HTTPS 8002.
++- Restored Samsung text entry. The app now tracks Tizen `ms.remote.imeStart` and `ms.remote.imeEnd` sessions instead of blindly closing every text session immediately.
++- Samsung text entry first tries the secure IME REST endpoint when a permanent token is available, then falls back to the WebSocket `SendInputString` protocol.
++- UTF-8 text is encoded correctly as Base64, and the text-session announcement is sent only when needed.
++- Netflix, YouTube and Internet no longer open several temporary app-control WebSockets during the same transition. This prevented connection saturation and reduced cases where Tizen closed the main remote channel after launching Netflix.
++- The installed application ID reported by the TV is preferred before generic fallback IDs, including Samsung Internet.
++- Application launch now stops after the first accepted command when the firmware cannot report active-app state, instead of repeatedly sending conflicting launch methods.
++- The app watches the full 15-second application/HDMI transition window and automatically restores the Samsung remote channel if Netflix or another app closes it several seconds later.
++- A successful launch command is never repeated merely because the TV closed the channel during the application transition.
++- Samsung authorization is preserved across DHCP IP changes and temporary REST failures. A token is removed only when the TV positively identifies as a different device or rejects it repeatedly.
++- A temporarily rejected token is retried after the app transition before the user is asked to approve the phone again.
++- Configuration, including the Samsung token, is written through a temporary file and backup to reduce the chance of losing authorization during an interrupted write.
+ - Netflix and PlayStation icons remain constrained to their buttons on mobile screens.
+ 
+ ## Samsung first connection
+@@ -26,7 +29,9 @@
+ 3. Approve Smart TV Remote on the television once.
+ 4. Wait until the diagnostics show that a permanent Samsung token was saved and the active port is 8002.
+ 
+-After a valid token is saved, changing HDMI, turning the TV off and on, or reopening the phone app should reuse the same authorization. If the television explicitly revokes the token, press Connect once and approve the new request.
++After a valid token is saved, changing HDMI, launching Netflix, turning the TV off and on, or reopening the phone app should reuse the same authorization. If the television explicitly revokes the token, press Connect once and approve the new request.
++
++For text entry, focus a text field on the television first, then open the phone keyboard, enter the text and press `Надіслати на TV`.
+ 
+ ## Google TV first connection
+ 
+diff -ruN srt065src/android/app/build.gradle srt066src/android/app/build.gradle
+--- srt065src/android/app/build.gradle	2026-07-31 17:49:05.000000000 +0000
++++ srt066src/android/app/build.gradle	2026-07-31 21:12:36.735299417 +0000
+@@ -10,8 +10,8 @@
+         applicationId "com.paul.smarttvremote"
+         minSdk 23
+         targetSdk 35
+-        versionCode 11
+-        versionName "0.6.5"
++        versionCode 12
++        versionName "0.6.6"
+     }
+ 
+     signingConfigs {
+diff -ruN srt065src/android/app/src/main/java/com/paul/smarttvremote/MainActivity.java srt066src/android/app/src/main/java/com/paul/smarttvremote/MainActivity.java
+--- srt065src/android/app/src/main/java/com/paul/smarttvremote/MainActivity.java	2026-07-31 17:49:05.000000000 +0000
++++ srt066src/android/app/src/main/java/com/paul/smarttvremote/MainActivity.java	2026-07-31 21:12:36.735299417 +0000
+@@ -46,7 +46,7 @@
+         settings.setAllowContentAccess(false);
+         settings.setMediaPlaybackRequiresUserGesture(false);
+         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+-        settings.setUserAgentString(settings.getUserAgentString() + " SmartTVRemote/0.6.5");
++        settings.setUserAgentString(settings.getUserAgentString() + " SmartTVRemote/0.6.6");
+ 
+         webView.setWebViewClient(new WebViewClient());
+         webView.setWebChromeClient(new WebChromeClient());
+diff -ruN srt065src/remoteapp/app.go srt066src/remoteapp/app.go
+--- srt065src/remoteapp/app.go	2026-07-31 17:49:05.000000000 +0000
++++ srt066src/remoteapp/app.go	2026-07-31 21:12:36.735299417 +0000
+@@ -15,7 +15,7 @@
+ 
+ const (
+ 	appName         = "Smart TV Remote"
+-	appVersion      = "0.6.5"
++	appVersion      = "0.6.6"
+ 	ProviderSamsung = "samsung"
+ 	ProviderGoogle  = "google"
+ )
+@@ -298,7 +298,47 @@
+ 	if err != nil {
+ 		return err
+ 	}
+-	return os.WriteFile(a.configPath, data, 0o600)
++	return writeConfigAtomically(a.configPath, data)
++}
++
++func writeConfigAtomically(path string, data []byte) error {
++	dir := filepath.Dir(path)
++	temporary, err := os.CreateTemp(dir, ".smart-tv-remote-config-*.tmp")
++	if err != nil {
++		return err
++	}
++	temporaryPath := temporary.Name()
++	cleanup := func() { _ = os.Remove(temporaryPath) }
++	defer cleanup()
++	if err := temporary.Chmod(0o600); err != nil {
++		_ = temporary.Close()
++		return err
++	}
++	if _, err := temporary.Write(data); err != nil {
++		_ = temporary.Close()
++		return err
++	}
++	if err := temporary.Sync(); err != nil {
++		_ = temporary.Close()
++		return err
++	}
++	if err := temporary.Close(); err != nil {
++		return err
++	}
++
++	backupPath := path + ".bak"
++	_ = os.Remove(backupPath)
++	if _, err := os.Stat(path); err == nil {
++		if err := os.Rename(path, backupPath); err != nil {
++			return err
++		}
++	}
++	if err := os.Rename(temporaryPath, path); err != nil {
++		_ = os.Rename(backupPath, path)
++		return err
++	}
++	_ = os.Remove(backupPath)
++	return nil
+ }
+ 
+ func (a *App) SetProvider(provider string) error {
+@@ -805,9 +845,10 @@
+ 				return LaunchResult{}, err
+ 			}
+ 			return LaunchResult{
+-				Confirmed: true,
+-				Message:   "Відкриваю останній активний HDMI-вхід або список входів",
+-				Attempts:  []string{"KEY_HDMI"},
++				Confirmed:   true,
++				CommandSent: true,
++				Message:     "Відкриваю останній активний HDMI-вхід або список входів",
++				Attempts:    []string{"KEY_HDMI"},
+ 			}, nil
+ 		})
+ 	default:
+diff -ruN srt065src/remoteapp/launch.go srt066src/remoteapp/launch.go
+--- srt065src/remoteapp/launch.go	2026-07-31 17:49:04.000000000 +0000
++++ srt066src/remoteapp/launch.go	2026-07-31 21:09:46.075304826 +0000
+@@ -4,8 +4,9 @@
+ // confirmed by the television. Some firmware versions do not expose active-app
+ // state, so a successful command can legitimately be unconfirmed.
+ type LaunchResult struct {
+-	Confirmed bool     `json:"confirmed"`
+-	Message   string   `json:"message"`
+-	AppID     string   `json:"appId,omitempty"`
+-	Attempts  []string `json:"attempts,omitempty"`
++	Confirmed   bool     `json:"confirmed"`
++	CommandSent bool     `json:"commandSent,omitempty"`
++	Message     string   `json:"message"`
++	AppID       string   `json:"appId,omitempty"`
++	Attempts    []string `json:"attempts,omitempty"`
+ }
+diff -ruN srt065src/remoteapp/samsung.go srt066src/remoteapp/samsung.go
+--- srt065src/remoteapp/samsung.go	2026-07-31 17:49:05.000000000 +0000
++++ srt066src/remoteapp/samsung.go	2026-07-31 21:09:12.059305905 +0000
+@@ -27,6 +27,7 @@
+ type SamsungClient struct {
+ 	mu          sync.RWMutex
+ 	writeMu     sync.Mutex
++	textMu      sync.Mutex
+ 	appListMu   sync.Mutex
+ 	conn        net.Conn
+ 	reader      *bufio.Reader
+@@ -35,6 +36,8 @@
+ 	token       string
+ 	connected   bool
+ 	closing     bool
++	imeActive   bool
++	textStarted bool
+ 	sessionID   uint64
+ 	stopCh      chan struct{}
+ 	OnLog       func(string)
+@@ -128,6 +131,8 @@
+ 	c.token = token
+ 	c.connected = false
+ 	c.closing = false
++	c.imeActive = false
++	c.textStarted = false
+ 	c.stopCh = stopCh
+ 	c.mu.Unlock()
+ 
+@@ -335,6 +340,17 @@
+ 	case "ed.installedApp.get":
+ 		apps := parseSamsungInstalledApps(envelope.Data)
+ 		c.deliverInstalledApps(apps)
++	case "ms.remote.imeStart":
++		c.mu.Lock()
++		c.imeActive = true
++		c.textStarted = false
++		c.mu.Unlock()
++		c.log("Samsung TV відкрив поле для віддаленого введення тексту.")
++	case "ms.remote.imeEnd":
++		c.mu.Lock()
++		c.imeActive = false
++		c.textStarted = false
++		c.mu.Unlock()
+ 	case "ms.error":
+ 		c.log("Samsung TV повернув помилку: " + strings.TrimSpace(string(envelope.Data)))
+ 	}
+@@ -548,6 +564,8 @@
+ 	c.reader = nil
+ 	c.connected = false
+ 	c.port = 0
++	c.imeActive = false
++	c.textStarted = false
+ 	c.stopCh = nil
+ 	c.mu.Unlock()
+ 
+@@ -628,28 +646,80 @@
+ 	})
+ }
+ 
+-func (c *SamsungClient) SendText(text string) error {
+-	if strings.TrimSpace(text) == "" {
+-		return errors.New("текст порожній")
+-	}
+-	_ = c.Send(map[string]any{
++func samsungTextReceivedCommand() map[string]any {
++	return map[string]any{
+ 		"method": "ms.channel.emit",
+ 		"params": map[string]any{"event": "custom.remote.textReceived", "to": "broadcast"},
+-	})
+-	if err := c.Send(map[string]any{
++	}
++}
++
++func samsungInputStringCommand(text string) map[string]any {
++	return map[string]any{
+ 		"method": "ms.remote.control",
+ 		"params": map[string]any{
+ 			"Cmd":          base64.StdEncoding.EncodeToString([]byte(text)),
+ 			"DataOfCmd":    "base64",
+ 			"TypeOfRemote": "SendInputString",
+ 		},
+-	}); err != nil {
+-		return err
+ 	}
+-	return c.Send(map[string]any{
++}
++
++func samsungInputEndCommand() map[string]any {
++	return map[string]any{
+ 		"method": "ms.remote.control",
+ 		"params": map[string]any{"TypeOfRemote": "SendInputEnd"},
+-	})
++	}
++}
++
++func (c *SamsungClient) sendTextWebSocket(text string) error {
++	c.mu.RLock()
++	started := c.textStarted
++	imeActive := c.imeActive
++	c.mu.RUnlock()
++
++	if !started {
++		if err := c.Send(samsungTextReceivedCommand()); err != nil {
++			return err
++		}
++		c.mu.Lock()
++		c.textStarted = true
++		c.mu.Unlock()
++		// Several recent Tizen builds need a small gap after announcing the
++		// text session before accepting the first input packet.
++		time.Sleep(55 * time.Millisecond)
++	}
++
++	if err := c.Send(samsungInputStringCommand(text)); err != nil {
++		return err
++	}
++
++	// When Tizen explicitly reported an active IME session, keep that session
++	// open. This lets the user send another fragment without the TV dropping
++	// the field. Older firmwares do not emit imeStart, so finish the one-shot
++	// input after a short processing delay for compatibility.
++	if !imeActive {
++		time.Sleep(140 * time.Millisecond)
++		if err := c.Send(samsungInputEndCommand()); err != nil {
++			return err
++		}
++		c.mu.Lock()
++		c.textStarted = false
++		c.mu.Unlock()
++	}
++	c.log("Текст надіслано через Samsung WebSocket IME.")
++	return nil
++}
++
++func (c *SamsungClient) SendText(text string) error {
++	if strings.TrimSpace(text) == "" {
++		return errors.New("текст порожній")
++	}
++	c.textMu.Lock()
++	defer c.textMu.Unlock()
++
++	if c.Token() != "" {
++		if err := c.sendTextREST(text); err == nil {
++			c.log("Текст надіслано через Samsung secure IME API.")
++			return nil
++		} else {
++			c.log("Samsung secure IME API недоступний, використовую WebSocket: " + err.Error())
++		}
++	}
++	return c.sendTextWebSocket(text)
+ }
+ 
+ func (c *SamsungClient) LaunchApp(appID, actionType, metaTag string) error {
+@@ -781,6 +851,8 @@
+ 	c.reader = nil
+ 	c.connected = false
+ 	c.port = 0
++	c.imeActive = false
++	c.textStarted = false
+ 	c.stopCh = nil
+ 	c.mu.Unlock()
+diff -ruN srt065src/remoteapp/samsung_apps.go srt066src/remoteapp/samsung_apps.go
+--- srt065src/remoteapp/samsung_apps.go	2026-07-31 17:49:05.000000000 +0000
++++ srt066src/remoteapp/samsung_apps.go	2026-07-31 21:14:08.431296473 +0000
+@@ -227,15 +227,6 @@
+ 
+ func samsungCandidates(kind string, installed []SamsungInstalledApp) []samsungAppCandidate {
+ 	var candidates []samsungAppCandidate
+-	if kind == "browser" {
+-		// This is the launch form used by Samsung's own browser remote helpers.
+-		candidates = append(candidates, samsungAppCandidate{
+-			AppID:      "org.tizen.browser",
+-			Name:       "Samsung Browser",
+-			ActionType: "NATIVE_LAUNCH",
+-			MetaTag:    "https://www.google.com",
+-		})
+-	}
+ 	if app := bestSamsungInstalledApp(kind, installed); app != nil {
+ 		meta := ""
+ 		if kind == "browser" {
+@@ -268,6 +259,9 @@
+ 		)
+ 	case "browser":
+ 		candidates = append(candidates,
++			// Prefer the ID reported by the TV above. These are fallbacks for
++			// firmware versions that do not expose the installed-app list.
++			samsungAppCandidate{AppID: "org.tizen.browser", Name: "Samsung Browser", ActionType: "NATIVE_LAUNCH", MetaTag: "https://www.google.com"},
+ 			samsungAppCandidate{AppID: "3202010022079", Name: "Internet", ActionType: "DEEP_LINK", MetaTag: "https://www.google.com"},
+ 			samsungAppCandidate{AppID: "webbrowser", Name: "Internet", ActionType: "NATIVE_LAUNCH", MetaTag: "https://www.google.com"},
+ 			samsungAppCandidate{AppID: "com.tizen.browser", Name: "Samsung Browser", ActionType: "NATIVE_LAUNCH", MetaTag: "https://www.google.com"},
+@@ -287,6 +281,27 @@
+ 	return result
+ }
+ 
++func (c *SamsungClient) prioritizeSamsungCandidates(candidates []samsungAppCandidate) ([]samsungAppCandidate, bool) {
++	ip := c.IP()
++	preferredPort := c.Port()
++	if ip == "" || len(candidates) < 2 {
++		return candidates, false
++	}
++	installed := make([]samsungAppCandidate, 0, len(candidates))
++	unknown := make([]samsungAppCandidate, 0, len(candidates))
++	stateSupported := false
++	for _, candidate := range candidates {
++		_, supported := fetchSamsungAppStatePreferred(ip, candidate.AppID, preferredPort, 450*time.Millisecond)
++		if supported {
++			stateSupported = true
++			installed = append(installed, candidate)
++		} else {
++			unknown = append(unknown, candidate)
++		}
++	}
++	return append(installed, unknown...), stateSupported
++}
++
+ func (c *SamsungClient) launchAppREST(candidate samsungAppCandidate) error {
+ 	ip := c.IP()
+ 	if ip == "" {
+@@ -392,7 +407,7 @@
+ 		return LaunchResult{}, ErrSamsungNotConnected
+ 	}
+ 	name := displaySamsungKind(kind)
+-	apps, listErr := c.GetInstalledApps(1800 * time.Millisecond)
++	apps, listErr := c.GetInstalledApps(1300 * time.Millisecond)
+ 	if listErr != nil {
+ 		c.log("Список застосунків Samsung недоступний: " + listErr.Error() + ". Використовую резервні ID для різних версій Tizen.")
+ 	}
+@@ -400,39 +415,42 @@
+ 	if len(candidates) == 0 {
+ 		return LaunchResult{}, errors.New("не знайдено кандидатів для запуску " + name)
+ 	}
++	candidates, probedState := c.prioritizeSamsungCandidates(candidates)
++	trustedFirstCandidate := probedState || len(apps) > 0
+ 	ids := make([]string, 0, len(candidates))
+ 	for _, candidate := range candidates {
+ 		ids = append(ids, candidate.AppID)
+ 	}
+-	attempts := make([]string, 0, len(candidates)*3+6)
++	attempts := make([]string, 0, len(candidates)+6)
+ 	commandSent := false
+-	stateSupported := false
++	stateSupported := probedState
+ 	var lastErr error
+ 
+ 	check := func(candidateIDs []string, wait time.Duration) (LaunchResult, bool) {
+ 		if id, active, supported := c.waitForSamsungApp(candidateIDs, wait); active {
+ 			c.log(name + " підтверджено активним застосунком " + id + ".")
+-			return LaunchResult{Confirmed: true, Message: name + " відкрито", AppID: id, Attempts: append([]string(nil), attempts...)}, true
++			return LaunchResult{Confirmed: true, CommandSent: true, Message: name + " відкрито", AppID: id, Attempts: append([]string(nil), attempts...)}, true
+ 		} else if supported {
+ 			stateSupported = true
+ 		}
+ 		return LaunchResult{}, false
+ 	}
+ 
+-	for _, candidate := range candidates {
++	for index, candidate := range candidates {
+ 		attempt := fmt.Sprintf("remote %s %s", candidate.AppID, candidate.ActionType)
+ 		attempts = append(attempts, attempt)
+ 		c.log("Samsung: пробую " + attempt + " для " + name + ".")
+@@ -440,40 +458,46 @@
+ 			lastErr = err
+ 		} else {
+ 			commandSent = true
+-			if result, ok := check([]string{candidate.AppID}, 850*time.Millisecond); ok {
++			wait := 1800 * time.Millisecond
++			if kind == "netflix" {
++				wait = 3200 * time.Millisecond
++			}
++			if result, ok := check([]string{candidate.AppID}, wait); ok {
+ 				return result, nil
+ 			}
+-		}
+-
+-		attempt = "app-control " + candidate.AppID
+-		attempts = append(attempts, attempt)
+-		if err := c.LaunchAppControl(candidate.AppID); err != nil {
+-			lastErr = err
+-			c.log(attempt + " не спрацював: " + err.Error())
+-		} else {
+-			commandSent = true
+-			if result, ok := check([]string{candidate.AppID}, 850*time.Millisecond); ok {
+-				return result, nil
++			if !c.IsConnected() {
++				return LaunchResult{
++					CommandSent: true,
++					Message:     name + " отримав команду запуску. TV оновлює канал пульта, підключення відновиться автоматично.",
++					AppID:       candidate.AppID,
++					Attempts:    attempts,
++				}, nil
+ 			}
+-		}
+-
+-		attempt = "REST " + candidate.AppID
+-		attempts = append(attempts, attempt)
+-		if err := c.launchAppREST(candidate); err != nil {
+-			lastErr = err
+-			c.log(attempt + " не спрацював: " + err.Error())
+-		} else {
+-			commandSent = true
+-			if result, ok := check([]string{candidate.AppID}, 850*time.Millisecond); ok {
+-				return result, nil
++			// When the TV does not expose app state, a successful remote launch
++			// is the strongest available signal. Do not open multiple temporary
++			// app-control sockets, because several 2024 Tizen builds close the
++			// main remote channel when those connections overlap an app switch.
++			if !stateSupported {
++				return LaunchResult{
++					CommandSent: true,
++					Message:     "Команду запуску " + name + " надіслано через основний канал пульта.",
++					AppID:       candidate.AppID,
++					Attempts:    attempts,
++				}, nil
++			}
++			if index == 0 && (trustedFirstCandidate || kind == "netflix") {
++				return LaunchResult{
++					CommandSent: true,
++					Message:     "Команду запуску " + name + " прийнято. Не надсилаю дублікати під час завантаження застосунку.",
++					AppID:       candidate.AppID,
++					Attempts:    attempts,
++				}, nil
+ 			}
+ 		}
+ 	}
+@@ -488,6 +512,32 @@
+ 		if result, ok := check(ids, 950*time.Millisecond); ok {
+ 			return result, nil
+ 		}
++		if !c.IsConnected() {
++			return LaunchResult{CommandSent: true, Message: name + " отримав команду. Відновлюю канал пульта.", Attempts: attempts}, nil
++		}
++		if !stateSupported {
++			return LaunchResult{CommandSent: true, Message: "Команду запуску " + name + " надіслано.", Attempts: attempts}, nil
++		}
++	}
++
++	// Use REST only after the persistent remote channel stayed alive and the TV
++	// explicitly reported that the previous candidates were not visible.
++	if len(candidates) > 0 && c.IsConnected() {
++		candidate := candidates[0]
++		attempt := "REST " + candidate.AppID
++		attempts = append(attempts, attempt)
++		if err := c.launchAppREST(candidate); err == nil {
++			commandSent = true
++			if result, ok := check([]string{candidate.AppID}, 1100*time.Millisecond); ok {
++				return result, nil
++			}
++		} else {
++			lastErr = err
++			c.log(attempt + " не спрацював: " + err.Error())
++		}
+ 	}
+ 
+ 	// DIAL is intentionally last. Some Samsung firmwares return HTTP 2xx even
+@@ -519,14 +569,16 @@
+ 	}
+ 	if stateSupported {
+ 		return LaunchResult{
+-			Confirmed: false,
+-			Message:   name + " не підтвердив запуск. У діагностиці збережено всі випробувані способи та ID.",
+-			Attempts:  attempts,
++			Confirmed:   false,
++			CommandSent: true,
++			Message:     name + " не підтвердив запуск. У діагностиці збережено всі випробувані способи та ID.",
++			Attempts:    attempts,
+ 		}, nil
+ 	}
+ 	return LaunchResult{
+-		Confirmed: false,
+-		Message:   "Команди запуску " + name + " надіслано, але ця прошивка TV не віддає стан застосунків.",
+-		Attempts:  attempts,
++		Confirmed:   false,
++		CommandSent: true,
++		Message:     "Команди запуску " + name + " надіслано, але ця прошивка TV не віддає стан застосунків.",
++		Attempts:    attempts,
+ 	}, nil
+ }
+diff -ruN srt065src/remoteapp/samsung_apps_test.go srt066src/remoteapp/samsung_apps_test.go
+--- srt065src/remoteapp/samsung_apps_test.go	2026-07-31 17:49:05.000000000 +0000
++++ srt066src/remoteapp/samsung_apps_test.go	2026-07-31 21:12:07.319300351 +0000
+@@ -69,3 +69,15 @@
+ 		t.Fatalf("unexpected first browser candidate: %#v", first)
+ 	}
+ }
++
++func TestSamsungBrowserPrefersInstalledAppBeforeFallback(t *testing.T) {
++	t.Parallel()
++	candidates := samsungCandidates("browser", []SamsungInstalledApp{{
++		AppID:   "installed-browser-id",
++		Name:    "Internet",
++		AppType: 2,
++	}})
++	if len(candidates) == 0 || candidates[0].AppID != "installed-browser-id" {
++		t.Fatalf("installed browser was not preferred: %#v", candidates)
++	}
++}
+diff -ruN srt065src/remoteapp/samsung_http.go srt066src/remoteapp/samsung_http.go
+--- srt065src/remoteapp/samsung_http.go	2026-07-31 17:49:05.000000000 +0000
++++ srt066src/remoteapp/samsung_http.go	2026-07-31 21:09:34.035305207 +0000
+@@ -3,11 +3,13 @@
+ import (
+ 	"bytes"
+ 	"crypto/tls"
++	"encoding/base64"
+ 	"errors"
+ 	"fmt"
+ 	"io"
+ 	"net"
+ 	"net/http"
++	"net/url"
+ 	"strings"
+ 	"time"
+ )
+@@ -94,3 +96,62 @@
+ 	}
+ 	return samsungHTTPResponse{}, lastErr
+ }
++
++func samsungIMEInputRoutes(text, token string) []string {
++	encoded := strings.ReplaceAll(base64.StdEncoding.EncodeToString([]byte(text)), "\n", "")
++	query := "?token=" + url.QueryEscape(token)
++	raw := "remoteControl/imeInput/" + encoded + query
++	escaped := "remoteControl/imeInput/" + url.PathEscape(encoded) + query
++	if raw == escaped {
++		return []string{raw}
++	}
++	// Existing Samsung implementations use the raw base64 route. The escaped
++	// variant is retained as a fallback for HTTP stacks that interpret '/' in
++	// the encoded text as an extra path separator.
++	return []string{raw, escaped}
++}
++
++func (c *SamsungClient) sendTextREST(text string) error {
++	c.mu.RLock()
++	ip, token, preferredPort := c.ip, c.token, c.port
++	c.mu.RUnlock()
++	if strings.TrimSpace(ip) == "" {
++		return errors.New("Samsung TV IP невідомий")
++	}
++	if strings.TrimSpace(token) == "" {
++		return errors.New("Samsung IME API потребує збережений токен")
++	}
++
++	var lastErr error
++	for _, route := range samsungIMEInputRoutes(text, token) {
++		response, err := samsungRESTRequest(
++			ip,
++			http.MethodPost,
++			route,
++			nil,
++			preferredPort,
++			2200*time.Millisecond,
++		)
++		if err != nil {
++			lastErr = err
++			continue
++		}
++		if response.StatusCode >= 200 && response.StatusCode < 300 {
++			return nil
++		}
++		lastErr = fmt.Errorf("Samsung IME API на порту %d повернув %s", response.Port, response.Status)
++	}
++	if lastErr == nil {
++		lastErr = errors.New("Samsung IME API не прийняв текст")
++	}
++	return lastErr
++}
+diff -ruN srt065src/remoteapp/samsung_reconnect.go srt066src/remoteapp/samsung_reconnect.go
+--- srt065src/remoteapp/samsung_reconnect.go	2026-07-31 17:49:05.000000000 +0000
++++ srt066src/remoteapp/samsung_reconnect.go	2026-07-31 21:10:21.01530363 +0000
+@@ -125,10 +125,16 @@
+ 	a.mu.Lock()
+ 	cfg := &a.cfg.Samsung
+ 	if info != nil {
+-		sameDevice := old.IP == ip || old.DeviceID == "" || old.DeviceID == info.ID || old.DeviceID == info.DUID
++		infoID := firstNonEmpty(info.ID, info.DUID)
++		sameDevice := old.DeviceID == "" || infoID == "" || old.DeviceID == info.ID || old.DeviceID == info.DUID
+ 		if sameDevice {
+ 			cfg.Token = old.Token
+ 			cfg.TokenAuthSupport = old.TokenAuthSupport || info.TokenAuthSupport
++		} else {
++			// Only discard authorization after the TV positively identifies as a
++			// different device. An IP change by itself is normal DHCP behaviour.
++			cfg.Token = ""
++			cfg.TokenAuthSupport = info.TokenAuthSupport
+ 		}
+ 		cfg.DeviceID = firstNonEmpty(info.ID, info.DUID, old.DeviceID)
+ 		cfg.DisplayName = firstNonEmpty(info.DisplayName, old.DisplayName, "Samsung TV")
+@@ -138,12 +144,16 @@
+ 		if info.RESTPort == 8001 || info.RESTPort == 8002 {
+ 			cfg.LastPort = info.RESTPort
+ 		}
+-	} else if old.IP != ip {
+-		cfg.Token = ""
+-		cfg.DeviceID = ""
+-		cfg.DisplayName = "Samsung TV"
+-		cfg.ModelName = ""
+-		cfg.TokenAuthSupport = false
++	} else {
++		// REST device information is often unavailable while Tizen is starting
++		// an app or waking from standby. Keep the known identity and token rather
++		// than treating that temporary failure as a new television.
++		cfg.Token = old.Token
++		cfg.DeviceID = old.DeviceID
++		cfg.DisplayName = firstNonEmpty(old.DisplayName, cfg.DisplayName, "Samsung TV")
++		cfg.ModelName = firstNonEmpty(old.ModelName, cfg.ModelName)
++		cfg.TokenAuthSupport = old.TokenAuthSupport || old.Token != ""
+ 	}
+ 	cfg.IP = ip
+ 	local := *cfg
+@@ -155,8 +165,17 @@
+ 	if secureRequired {
+ 		ports = []int{8002}
+ 	}
+-	if err := a.samsung.Connect(ip, local.Token, ports); err != nil {
+-		if errors.Is(err, ErrSamsungUnauthorized) && allowAuthorization && local.Token != "" {
++	connectErr := a.samsung.Connect(ip, local.Token, ports)
++	if errors.Is(connectErr, ErrSamsungUnauthorized) && allowAuthorization && local.Token != "" {
++		// Some Tizen builds briefly reject an otherwise valid token while an app
++		// or HDMI source is taking over. Retry the same token once before asking
++		// the user to approve the phone again.
++		a.addLog("Samsung тимчасово відхилив збережений токен. Повторно перевіряю його після завершення переходу.")
++		time.Sleep(950 * time.Millisecond)
++		connectErr = a.samsung.Connect(ip, local.Token, []int{8002})
++	}
++	if connectErr != nil {
++		if errors.Is(connectErr, ErrSamsungUnauthorized) && allowAuthorization && local.Token != "" {
+ 			a.addLog("Збережений токен Samsung застарів. Видаляю тільки старий токен і запитую новий дозвіл один раз.")
+ 			a.mu.Lock()
+ 			a.cfg.Samsung.Token = ""
+@@ -169,7 +188,7 @@
+ 				return retryErr
+ 			}
+ 		} else {
+-			return err
++			return connectErr
+ 		}
+ 	}
+ 
+@@ -264,7 +283,7 @@
+ 		return LaunchResult{}, err
+ 	}
+ 	result, err := operation()
+-	if err != nil && isSamsungTransportError(err) {
++	if err != nil && isSamsungTransportError(err) && !result.CommandSent {
+ 		a.samsung.Close()
+ 		if reconnectErr := a.ensureSamsungConnected(); reconnectErr == nil {
+ 			result, err = operation()
+@@ -272,17 +291,28 @@
+ 			a.scheduleSamsungReconnect(reconnectErr.Error())
+ 		}
+ 	}
+-	a.watchSamsungTransition()
++	if result.CommandSent || err == nil {
++		a.watchSamsungTransition()
++	}
+ 	return result, err
+ }
+ 
+ func (a *App) watchSamsungTransition() {
+ 	go func() {
+-		time.Sleep(850 * time.Millisecond)
+-		a.mu.RLock()
+-		allowed := a.samsungReconnectAllowed && a.cfg.Provider == ProviderSamsung
+-		a.mu.RUnlock()
+-		if allowed && !a.samsung.IsConnected() {
+-			a.scheduleSamsungReconnect("TV закрив канал під час зміни застосунку або HDMI")
++		// App and HDMI transitions can close the remote channel several seconds
++		// after the launch command. Watch the whole transition window instead of
++		// checking only once, so Netflix cannot leave the UI permanently disabled.
++		for attempt := 0; attempt < 20; attempt++ {
++			time.Sleep(750 * time.Millisecond)
++			a.mu.RLock()
++			allowed := a.samsungReconnectAllowed && a.cfg.Provider == ProviderSamsung
++			a.mu.RUnlock()
++			if !allowed {
++				return
++			}
++			if !a.samsung.IsConnected() {
++				a.scheduleSamsungReconnect("TV закрив канал під час зміни застосунку або HDMI")
++				return
++			}
+ 		}
+ 	}()
+ }
+diff -ruN srt065src/remoteapp/samsung_text_test.go srt066src/remoteapp/samsung_text_test.go
+--- srt065src/remoteapp/samsung_text_test.go	1970-01-01 00:00:00.000000000 +0000
++++ srt066src/remoteapp/samsung_text_test.go	2026-07-31 21:12:07.315300351 +0000
+@@ -0,0 +1,79 @@
++package remoteapp
++
++import (
++	"encoding/base64"
++	"encoding/json"
++	"net/url"
++	"os"
++	"path/filepath"
++	"testing"
++)
++
++func TestSamsungInputStringCommandUsesUTF8Base64(t *testing.T) {
++	t.Parallel()
++	text := "Привіт, Samsung"
++	command := samsungInputStringCommand(text)
++	payload, err := json.Marshal(command)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var decoded struct {
++		Method string `json:"method"`
++		Params struct {
++			Cmd          string `json:"Cmd"`
++			DataOfCmd    string `json:"DataOfCmd"`
++			TypeOfRemote string `json:"TypeOfRemote"`
++		} `json:"params"`
++	}
++	if err := json.Unmarshal(payload, &decoded); err != nil {
++		t.Fatal(err)
++	}
++	if decoded.Method != "ms.remote.control" || decoded.Params.TypeOfRemote != "SendInputString" || decoded.Params.DataOfCmd != "base64" {
++		t.Fatalf("unexpected command: %#v", decoded)
++	}
++	if got := decoded.Params.Cmd; got != base64.StdEncoding.EncodeToString([]byte(text)) {
++		t.Fatalf("encoded text = %q", got)
++	}
++}
++
++func TestSamsungIMEInputRoutesContainTokenAndEncodedText(t *testing.T) {
++	t.Parallel()
++	routes := samsungIMEInputRoutes("a/b + тест", "token value")
++	if len(routes) == 0 {
++		t.Fatal("expected at least one IME route")
++	}
++	for _, route := range routes {
++		parsed, err := url.Parse("https://tv.local/api/v2/" + route)
++		if err != nil {
++			t.Fatalf("parse route %q: %v", route, err)
++		}
++		if parsed.Query().Get("token") != "token value" {
++			t.Fatalf("route does not preserve token: %q", route)
++		}
++		if parsed.Path == "/api/v2/remoteControl/imeInput/" {
++			t.Fatalf("route does not contain encoded text: %q", route)
++		}
++	}
++}
++
++func TestWriteConfigAtomicallyReplacesExistingFile(t *testing.T) {
++	t.Parallel()
++	dir := t.TempDir()
++	path := filepath.Join(dir, "config.json")
++	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
++		t.Fatal(err)
++	}
++	if err := writeConfigAtomically(path, []byte("new")); err != nil {
++		t.Fatal(err)
++	}
++	data, err := os.ReadFile(path)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if string(data) != "new" {
++		t.Fatalf("config = %q", data)
++	}
++	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
++		t.Fatalf("backup should be removed, got %v", err)
++	}
++}
+diff -ruN srt065src/remoteapp/server.go srt066src/remoteapp/server.go
+--- srt065src/remoteapp/server.go	2026-07-31 17:49:05.000000000 +0000
++++ srt066src/remoteapp/server.go	2026-07-31 21:10:43.935302904 +0000
+@@ -220,11 +220,12 @@
+ 			a.setControlModeHint(mode)
+ 		}
+ 		writeJSON(w, http.StatusOK, map[string]any{
+-			"ok":        true,
+-			"confirmed": result.Confirmed,
+-			"message":   result.Message,
+-			"appId":     result.AppID,
+-			"attempts":  result.Attempts,
++			"ok":          true,
++			"confirmed":   result.Confirmed,
++			"commandSent": result.CommandSent,
++			"message":     result.Message,
++			"appId":       result.AppID,
++			"attempts":    result.Attempts,
+ 		})
+ 	})
+ 	mux.HandleFunc("/api/disconnect", func(w http.ResponseWriter, r *http.Request) {
+diff -ruN srt065src/remoteapp/web/index.html srt066src/remoteapp/web/index.html
+--- srt065src/remoteapp/web/index.html	2026-07-31 17:49:05.000000000 +0000
++++ srt066src/remoteapp/web/index.html	2026-07-31 21:12:36.735299417 +0000
+@@ -544,7 +544,7 @@
+       <div class="brand-mark">TV</div>
+       <div class="header-copy">
+         <h1>Smart TV Remote</h1>
+-        <p class="subtitle">Samsung Tizen + Thomson / Google TV · версія <span id="appVersion">0.6.5</span></p>
++        <p class="subtitle">Samsung Tizen + Thomson / Google TV · версія <span id="appVersion">0.6.6</span></p>
+       </div>
+       <div id="statusPill" class="status-pill idle" title="Стан підключення">
+         <span class="status-dot"></span>
+@@ -841,7 +841,7 @@
+         const status = state.status || 'idle';
+         elements.statusPill.className = `status-pill ${status}`;
+         elements.statusText.textContent = state.message || status;
+-        if (elements.appVersion) elements.appVersion.textContent = state.version || '0.6.5';
++        if (elements.appVersion) elements.appVersion.textContent = state.version || '0.6.6';
+         if (lastRenderedProvider !== state.provider) {
+           lastRenderedProvider = state.provider;
+           elements.provider.value = state.provider || 'samsung';
