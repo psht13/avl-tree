@@ -34,6 +34,17 @@ jobs:
             echo "Running ${script}"
             bash "${script}" smart-tv-remote
           done
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('smart-tv-remote/remoteapp/server.go')
+          source = path.read_text(encoding='utf-8')
+          if 'staticFS, err := fs.Sub(webFS, "web")' in source and 'mux.Handle("/assets/", http.FileServer(http.FS(staticFS)))' not in source:
+              marker = '\tif err != nil {\n\t\tpanic(err)\n\t}\n'
+              if marker not in source:
+                  raise SystemExit('could not locate staticFS error block in server.go')
+              source = source.replace(marker, marker + '\tmux.Handle("/assets/", http.FileServer(http.FS(staticFS)))\n', 1)
+              path.write_text(source, encoding='utf-8')
+          PY
           for path in \
             smart-tv-remote/go.mod \
             smart-tv-remote/remoteapp/google.go \
@@ -48,6 +59,7 @@ jobs:
           done
           grep -R 'appVersion.*0.6.2' smart-tv-remote/remoteapp/app.go
           grep -R 'versionName "0.6.2"' smart-tv-remote/android/app/build.gradle
+          grep -F 'mux.Handle("/assets/", http.FileServer(http.FS(staticFS)))' smart-tv-remote/remoteapp/server.go
           find smart-tv-remote -type f | sort
 
       - name: Set up current stable Go
