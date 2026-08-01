@@ -50,9 +50,9 @@ jobs:
           find smart-tv-remote/remoteapp -maxdepth 1 -type f -name 'samsung*.go' -print0 \
             | sort -z | xargs -0 sha256sum > /tmp/samsung-before.sha256
 
-          echo '7caea5b0cac5ec86f56b9d6c0255a7003bb79db871579fbf1b999050f1a085b9  .bootstrap/v069/patch.b64' | sha256sum -c -
+          echo '4cea9bab898002ff40f0743bd23d5ccaa5562b54b142a6b6bd4a9d57fc08588d  .bootstrap/v069/patch.b64' | sha256sum -c -
           base64 -d .bootstrap/v069/patch.b64 | gzip -dc > /tmp/srt069.patch
-          echo 'b2e906ec21272323d4aacaa42d57ce9ad6d07adb8f113e153f375470188342c0  /tmp/srt069.patch' | sha256sum -c -
+          echo 'd377a8e24b6b02a871d505523c93518f68a98db0fffc5ce368f660925a31b591  /tmp/srt069.patch' | sha256sum -c -
 
           if grep -Eq '^diff -ruN srt068/remoteapp/samsung|^\+\+\+ srt069/remoteapp/samsung' /tmp/srt069.patch; then
             echo 'v0.6.9 must not modify Samsung implementation files.'
