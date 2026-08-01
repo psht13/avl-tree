@@ -50,7 +50,6 @@ jobs:
           find smart-tv-remote/remoteapp -maxdepth 1 -type f -name 'samsung*.go' -print0 \
             | sort -z | xargs -0 sha256sum > /tmp/samsung-before.sha256
 
-          echo '4cea9bab898002ff40f0743bd23d5ccaa5562b54b142a6b6bd4a9d57fc08588d  .bootstrap/v069/patch.b64' | sha256sum -c -
           base64 -d .bootstrap/v069/patch.b64 | gzip -dc > /tmp/srt069.patch
           echo 'd377a8e24b6b02a871d505523c93518f68a98db0fffc5ce368f660925a31b591  /tmp/srt069.patch' | sha256sum -c -
 
