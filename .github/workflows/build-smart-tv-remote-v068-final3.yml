@@ -1,0 +1,371 @@
+name: Build Smart TV Remote v0.6.8 final 3
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/build-smart-tv-remote-v068-final3.yml"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    env:
+      APP_VERSION: "0.6.8"
+      ANDROID_NDK_VERSION: "27.1.12297006"
+      BASE_BUILD_RUN_ID: "30705827066"
+      CGO_ENABLED: "0"
+
+    steps:
+      - name: Checkout temporary build branch
+        uses: actions/checkout@v4
+
+      - name: Download validated v0.6.8 source artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SmartTVRemote-v0.6.8-builds
+          path: base-artifact
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.BASE_BUILD_RUN_ID }}
+
+      - name: Apply final Thomson-only source edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s base-artifact/SmartTVRemote-v0.6.8-source.tar.xz
+          rm -rf smart-tv-remote
+          mkdir -p smart-tv-remote
+          tar -xJf base-artifact/SmartTVRemote-v0.6.8-source.tar.xz -C smart-tv-remote
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('smart-tv-remote')
+
+          java = root / 'android/app/src/main/java/com/paul/smarttvremote/MainActivity.java'
+          source = java.read_text(encoding='utf-8')
+          source = source.replace(
+              'import android.app.Activity;\nimport android.content.Intent;\n',
+              'import android.Manifest;\nimport android.app.Activity;\nimport android.content.Intent;\nimport android.content.pm.PackageManager;\n',
+              1,
+          )
+          source = source.replace(
+              '    private static final int VOICE_REQUEST = 4106;\n',
+              '    private static final int VOICE_REQUEST = 4106;\n    private static final int AUDIO_PERMISSION_REQUEST = 4107;\n',
+              1,
+          )
+          old_bridge = '''    private final class VoiceBridge {
+              @JavascriptInterface
+              public void start(String language) {
+                  pendingVoiceLanguage = language == null || language.isEmpty() ? "uk-UA" : language;
+                  // RecognizerIntent is handled by the phone's system speech app.
+                  // It owns microphone access, so requiring a second WebView/app
+                  // RECORD_AUDIO permission only causes false "not allowed" errors.
+                  runOnUiThread(MainActivity.this::launchVoiceRecognition);
+              }
+          }
+          '''
+          new_bridge = '''    private final class VoiceBridge {
+              @JavascriptInterface
+              public void start(String language) {
+                  pendingVoiceLanguage = language == null || language.isEmpty() ? "uk-UA" : language;
+                  // Preserve the existing Samsung path exactly: its WebView/native
+                  // fallback still asks for the app microphone permission.
+                  runOnUiThread(() -> {
+                      if (android.os.Build.VERSION.SDK_INT >= 23
+                              && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                          requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, AUDIO_PERMISSION_REQUEST);
+                          return;
+                      }
+                      launchVoiceRecognition();
+                  });
+              }
+
+              @JavascriptInterface
+              public void startSystem(String language) {
+                  pendingVoiceLanguage = language == null || language.isEmpty() ? "uk-UA" : language;
+                  // Thomson / Google TV uses the phone's system recognizer directly.
+                  // The recognizer application owns microphone access, avoiding the
+                  // WebView SpeechRecognition "not-allowed" failure.
+                  runOnUiThread(MainActivity.this::launchVoiceRecognition);
+              }
+          }
+          '''
+          if old_bridge not in source:
+              raise SystemExit('VoiceBridge baseline block not found')
+          source = source.replace(old_bridge, new_bridge, 1)
+          activity_marker = '''    @Override
+              protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+          '''
+          permission_callback = '''    @Override
+              public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+                  super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+                  if (requestCode == AUDIO_PERMISSION_REQUEST) {
+                      if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                          launchVoiceRecognition();
+                      } else {
+                          sendVoiceError("Дозвіл на мікрофон не надано.");
+                      }
+                  }
+              }
+
+          '''
+          if activity_marker not in source:
+              raise SystemExit('onActivityResult marker not found')
+          source = source.replace(activity_marker, permission_callback + activity_marker, 1)
+          java.write_text(source, encoding='utf-8')
+
+          manifest = root / 'android/app/src/main/AndroidManifest.xml'
+          manifest_source = manifest.read_text(encoding='utf-8')
+          permission_marker = '    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />\n'
+          if permission_marker not in manifest_source:
+              raise SystemExit('manifest permission marker not found')
+          manifest_source = manifest_source.replace(
+              permission_marker,
+              permission_marker + '    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n',
+              1,
+          )
+          manifest.write_text(manifest_source, encoding='utf-8')
+
+          html = root / 'remoteapp/web/index.html'
+          ui = html.read_text(encoding='utf-8')
+          helper = "      function hasNativeVoice() { return !!(window.NativeVoice && typeof window.NativeVoice.start === 'function'); }\n"
+          if helper not in ui:
+              raise SystemExit('native voice helper not found')
+          ui = ui.replace(
+              helper,
+              helper + "      function hasNativeSystemVoice() { return !!(window.NativeVoice && typeof window.NativeVoice.startSystem === 'function'); }\n",
+              1,
+          )
+          old_voice = '''        // Android WebView exposes a SpeechRecognition object on some phones but
+                  // rejects microphone access with "not-allowed". The native Android
+                  // RecognizerIntent is the reliable path, so prefer it whenever present.
+                  if (hasNativeVoice()) {
+                    setVoiceListening(true);
+                    elements.voiceStatus.textContent = 'Відкриваю системне голосове введення…';
+                    try {
+                      window.NativeVoice.start(elements.speechLanguage.value);
+                    } catch (error) {
+                      setVoiceListening(false);
+                      elements.voiceStatus.textContent = `Помилка: ${error.message || 'не вдалося відкрити голосове введення'}`;
+                    }
+                    return;
+                  }
+
+                  const Recognition = speechConstructor();
+                  if (!Recognition) {
+                    elements.voiceStatus.textContent = 'Голосове розпізнавання недоступне на цьому пристрої.';
+                    return;
+                  }
+          '''
+          new_voice = '''        // Android WebView exposes SpeechRecognition on some phones but rejects
+                  // microphone access with "not-allowed". Use the native system recognizer
+                  // only for Thomson / Google TV. Samsung keeps its previous voice path.
+                  if (state.provider === 'google' && hasNativeSystemVoice()) {
+                    setVoiceListening(true);
+                    elements.voiceStatus.textContent = 'Відкриваю системне голосове введення…';
+                    try {
+                      window.NativeVoice.startSystem(elements.speechLanguage.value);
+                    } catch (error) {
+                      setVoiceListening(false);
+                      elements.voiceStatus.textContent = `Помилка: ${error.message || 'не вдалося відкрити голосове введення'}`;
+                    }
+                    return;
+                  }
+
+                  const Recognition = speechConstructor();
+                  if (!Recognition) {
+                    if (hasNativeVoice()) {
+                      setVoiceListening(true);
+                      elements.voiceStatus.textContent = 'Відкриваю системне голосове введення…';
+                      try {
+                        window.NativeVoice.start(elements.speechLanguage.value);
+                      } catch (error) {
+                        setVoiceListening(false);
+                        elements.voiceStatus.textContent = `Помилка: ${error.message || 'не вдалося відкрити голосове введення'}`;
+                      }
+                      return;
+                    }
+                    elements.voiceStatus.textContent = 'Голосове розпізнавання недоступне на цьому пристрої.';
+                    return;
+                  }
+          '''
+          if old_voice not in ui:
+              raise SystemExit('voice routing block not found')
+          ui = ui.replace(old_voice, new_voice, 1)
+          html.write_text(ui, encoding='utf-8')
+          PY
+
+          find smart-tv-remote -name '*.go' -type f -print0 | xargs -0 gofmt -w
+
+          grep -F 'appVersion      = "0.6.8"' smart-tv-remote/remoteapp/app.go
+          grep -F 'versionCode 14' smart-tv-remote/android/app/build.gradle
+          grep -F 'versionName "0.6.8"' smart-tv-remote/android/app/build.gradle
+          grep -F 'const googleFeatures int32 = 622' smart-tv-remote/remoteapp/google.go
+          grep -F 'RemoteImeShowRequest' smart-tv-remote/remoteapp/google.go
+          grep -F 'googleTextMessages' smart-tv-remote/remoteapp/google.go
+          grep -F 'window.NativeVoice.startSystem' smart-tv-remote/remoteapp/web/index.html
+          grep -F "state.provider === 'google' && hasNativeSystemVoice()" smart-tv-remote/remoteapp/web/index.html
+          grep -F 'public void startSystem(String language)' smart-tv-remote/android/app/src/main/java/com/paul/smarttvremote/MainActivity.java
+          grep -F 'android.permission.RECORD_AUDIO' smart-tv-remote/android/app/src/main/AndroidManifest.xml
+          grep -F 'KEY_HDMI1' smart-tv-remote/remoteapp/google.go
+          grep -F 'GooglePSHDMI' smart-tv-remote/remoteapp/app.go
+          grep -F '/api/google/ps-hdmi' smart-tv-remote/remoteapp/server.go
+
+      - name: Set up current stable Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Install Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y zip unzip file
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;${ANDROID_NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Resolve dependencies and validate code
+        working-directory: smart-tv-remote
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod tidy
+          unformatted="$(gofmt -l $(find . -name '*.go' -type f))"
+          if [[ -n "$unformatted" ]]; then
+            echo "$unformatted"
+            exit 1
+          fi
+          CGO_ENABLED=1 go test -race ./...
+          CGO_ENABLED=1 go vet ./...
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          html = Path('remoteapp/web/index.html').read_text(encoding='utf-8')
+          scripts = re.findall(r'<script>(.*?)</script>', html, re.S)
+          if len(scripts) != 1:
+              raise SystemExit(f'expected one inline script, found {len(scripts)}')
+          script = scripts[0]
+          google_native = script.index("state.provider === 'google' && hasNativeSystemVoice()")
+          web_speech = script.index('const Recognition = speechConstructor()')
+          samsung_fallback = script.index('if (hasNativeVoice())', web_speech)
+          if google_native >= web_speech:
+              raise SystemExit('Thomson native recognizer must run before Web Speech')
+          if samsung_fallback <= web_speech:
+              raise SystemExit('Samsung voice fallback order changed unexpectedly')
+          Path('/tmp/smart-tv-remote-ui.js').write_text(script, encoding='utf-8')
+          PY
+          node --check /tmp/smart-tv-remote-ui.js
+
+      - name: Build Windows x64 EXE
+        working-directory: smart-tv-remote
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../artifact
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
+            -trimpath \
+            -ldflags="-s -w -H=windowsgui" \
+            -o "../artifact/SmartTVRemote-v${APP_VERSION}-Windows-x64.exe" \
+            ./cmd/windows
+          test -s "../artifact/SmartTVRemote-v${APP_VERSION}-Windows-x64.exe"
+
+      - name: Build Android bridge AAR
+        working-directory: smart-tv-remote
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile init
+          mkdir -p android/app/libs
+          gomobile bind \
+            -target=android \
+            -androidapi=23 \
+            -javapkg=com.paul.remote \
+            -o android/app/libs/mobilebridge.aar \
+            ./mobilebridge
+          test -s android/app/libs/mobilebridge.aar
+          unzip -t android/app/libs/mobilebridge.aar
+
+      - name: Build installable Android APK
+        working-directory: smart-tv-remote/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace :app:assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk "../../artifact/SmartTVRemote-v${APP_VERSION}-debug.apk"
+          test -s "../../artifact/SmartTVRemote-v${APP_VERSION}-debug.apk"
+
+      - name: Validate and package binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe="artifact/SmartTVRemote-v${APP_VERSION}-Windows-x64.exe"
+          apk="artifact/SmartTVRemote-v${APP_VERSION}-debug.apk"
+          checksums="artifact/SmartTVRemote-v${APP_VERSION}-SHA256.txt"
+
+          file "$exe" | tee artifact/WINDOWS-FILE-TYPE.txt
+          file "$apk" | tee artifact/APK-FILE-TYPE.txt
+          unzip -t "$apk"
+          "${ANDROID_SDK_ROOT}/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$apk" | tee artifact/APK-SIGNATURE.txt
+          "${ANDROID_SDK_ROOT}/build-tools/35.0.0/aapt" dump badging "$apk" | tee artifact/APK-BADGING.txt
+          grep -F "package: name='com.paul.smarttvremote' versionCode='14' versionName='0.6.8'" artifact/APK-BADGING.txt
+          grep -F "uses-permission: name='android.permission.RECORD_AUDIO'" artifact/APK-BADGING.txt
+
+          sha256sum "$exe" "$apk" > "$checksums"
+          cp smart-tv-remote/README.md artifact/README.md
+          cp smart-tv-remote/THIRD_PARTY_NOTICES.md artifact/THIRD_PARTY_NOTICES.md
+          tar \
+            --exclude='./android/.gradle' \
+            --exclude='./android/app/build' \
+            --exclude='./android/app/libs/mobilebridge.aar' \
+            -cJf "artifact/SmartTVRemote-v${APP_VERSION}-source.tar.xz" \
+            -C smart-tv-remote .
+          sha256sum "artifact/SmartTVRemote-v${APP_VERSION}-source.tar.xz" >> "$checksums"
+
+          cd artifact
+          zip -9 "SmartTVRemote-v${APP_VERSION}-Windows-x64.zip" \
+            "SmartTVRemote-v${APP_VERSION}-Windows-x64.exe" \
+            README.md THIRD_PARTY_NOTICES.md \
+            "SmartTVRemote-v${APP_VERSION}-SHA256.txt" WINDOWS-FILE-TYPE.txt
+          zip -9 "SmartTVRemote-v${APP_VERSION}-Android.zip" \
+            "SmartTVRemote-v${APP_VERSION}-debug.apk" \
+            README.md THIRD_PARTY_NOTICES.md \
+            "SmartTVRemote-v${APP_VERSION}-SHA256.txt" \
+            APK-FILE-TYPE.txt APK-SIGNATURE.txt APK-BADGING.txt
+          unzip -t "SmartTVRemote-v${APP_VERSION}-Windows-x64.zip"
+          unzip -t "SmartTVRemote-v${APP_VERSION}-Android.zip"
+
+      - name: Upload final APK, EXE and reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartTVRemote-v0.6.8-final3-builds
+          path: artifact/*
+          if-no-files-found: error
+          retention-days: 7
