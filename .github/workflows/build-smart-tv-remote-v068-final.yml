@@ -1,0 +1,222 @@
+name: Build Smart TV Remote v0.6.8 final
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".bootstrap/v068/provider-voice-isolation.patch"
+      - ".github/workflows/build-smart-tv-remote-v068-final.yml"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    env:
+      APP_VERSION: "0.6.8"
+      ANDROID_NDK_VERSION: "27.1.12297006"
+      BASE_BUILD_RUN_ID: "30705827066"
+      CGO_ENABLED: "0"
+
+    steps:
+      - name: Checkout temporary build branch
+        uses: actions/checkout@v4
+
+      - name: Download validated v0.6.8 source artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SmartTVRemote-v0.6.8-builds
+          path: base-artifact
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.BASE_BUILD_RUN_ID }}
+
+      - name: Apply final Thomson-only voice isolation patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s base-artifact/SmartTVRemote-v0.6.8-source.tar.xz
+          rm -rf smart-tv-remote
+          mkdir -p smart-tv-remote
+          tar -xJf base-artifact/SmartTVRemote-v0.6.8-source.tar.xz -C smart-tv-remote
+
+          echo 'dc94709e1f9dd1e4f874c695904975a158be439b02e97e47b47f5848ea8aefad  .bootstrap/v068/provider-voice-isolation.patch' | sha256sum -c -
+          if grep -Eq '^diff -ruN .*remoteapp/samsung|^\+\+\+ .*remoteapp/samsung' .bootstrap/v068/provider-voice-isolation.patch; then
+            echo 'The final v0.6.8 patch must not modify Samsung implementation files.'
+            exit 1
+          fi
+          patch --dry-run -p1 -d smart-tv-remote < .bootstrap/v068/provider-voice-isolation.patch
+          patch -p1 -d smart-tv-remote < .bootstrap/v068/provider-voice-isolation.patch
+
+          find smart-tv-remote -name '*.go' -type f -print0 | xargs -0 gofmt -w
+
+          grep -F 'appVersion      = "0.6.8"' smart-tv-remote/remoteapp/app.go
+          grep -F 'versionCode 14' smart-tv-remote/android/app/build.gradle
+          grep -F 'versionName "0.6.8"' smart-tv-remote/android/app/build.gradle
+          grep -F 'const googleFeatures int32 = 622' smart-tv-remote/remoteapp/google.go
+          grep -F 'RemoteImeShowRequest' smart-tv-remote/remoteapp/google.go
+          grep -F 'googleTextMessages' smart-tv-remote/remoteapp/google.go
+          grep -F 'window.NativeVoice.startSystem' smart-tv-remote/remoteapp/web/index.html
+          grep -F "state.provider === 'google' && hasNativeSystemVoice()" smart-tv-remote/remoteapp/web/index.html
+          grep -F 'public void startSystem(String language)' smart-tv-remote/android/app/src/main/java/com/paul/smarttvremote/MainActivity.java
+          grep -F 'android.permission.RECORD_AUDIO' smart-tv-remote/android/app/src/main/AndroidManifest.xml
+          grep -F 'KEY_HDMI1' smart-tv-remote/remoteapp/google.go
+          grep -F 'GooglePSHDMI' smart-tv-remote/remoteapp/app.go
+          grep -F '/api/google/ps-hdmi' smart-tv-remote/remoteapp/server.go
+
+      - name: Set up current stable Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Install Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y zip unzip file patch
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;${ANDROID_NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Resolve dependencies and validate code
+        working-directory: smart-tv-remote
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod tidy
+          unformatted="$(gofmt -l $(find . -name '*.go' -type f))"
+          if [[ -n "$unformatted" ]]; then
+            echo "The following Go files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+          CGO_ENABLED=1 go test -race ./...
+          CGO_ENABLED=1 go vet ./...
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          html = Path('remoteapp/web/index.html').read_text(encoding='utf-8')
+          scripts = re.findall(r'<script>(.*?)</script>', html, re.S)
+          if len(scripts) != 1:
+              raise SystemExit(f'expected one inline script, found {len(scripts)}')
+          script = scripts[0]
+          google_native = script.index("state.provider === 'google' && hasNativeSystemVoice()")
+          web_speech = script.index('const Recognition = speechConstructor()')
+          samsung_native_fallback = script.index('if (hasNativeVoice())', web_speech)
+          if google_native >= web_speech:
+              raise SystemExit('Thomson native recognizer must run before Web Speech')
+          if samsung_native_fallback <= web_speech:
+              raise SystemExit('Samsung/native fallback order changed unexpectedly')
+          Path('/tmp/smart-tv-remote-ui.js').write_text(script, encoding='utf-8')
+          PY
+          node --check /tmp/smart-tv-remote-ui.js
+
+      - name: Build Windows x64 EXE
+        working-directory: smart-tv-remote
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../artifact
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
+            -trimpath \
+            -ldflags="-s -w -H=windowsgui" \
+            -o "../artifact/SmartTVRemote-v${APP_VERSION}-Windows-x64.exe" \
+            ./cmd/windows
+          test -s "../artifact/SmartTVRemote-v${APP_VERSION}-Windows-x64.exe"
+
+      - name: Build Android bridge AAR
+        working-directory: smart-tv-remote
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile init
+          mkdir -p android/app/libs
+          gomobile bind \
+            -target=android \
+            -androidapi=23 \
+            -javapkg=com.paul.remote \
+            -o android/app/libs/mobilebridge.aar \
+            ./mobilebridge
+          test -s android/app/libs/mobilebridge.aar
+          unzip -t android/app/libs/mobilebridge.aar
+
+      - name: Build installable Android APK
+        working-directory: smart-tv-remote/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace :app:assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk "../../artifact/SmartTVRemote-v${APP_VERSION}-debug.apk"
+          test -s "../../artifact/SmartTVRemote-v${APP_VERSION}-debug.apk"
+
+      - name: Validate binaries and package downloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe="artifact/SmartTVRemote-v${APP_VERSION}-Windows-x64.exe"
+          apk="artifact/SmartTVRemote-v${APP_VERSION}-debug.apk"
+          checksums="artifact/SmartTVRemote-v${APP_VERSION}-SHA256.txt"
+
+          file "$exe" | tee artifact/WINDOWS-FILE-TYPE.txt
+          file "$apk" | tee artifact/APK-FILE-TYPE.txt
+          unzip -t "$apk"
+          "${ANDROID_SDK_ROOT}/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$apk" | tee artifact/APK-SIGNATURE.txt
+          "${ANDROID_SDK_ROOT}/build-tools/35.0.0/aapt" dump badging "$apk" | tee artifact/APK-BADGING.txt
+          grep -F "package: name='com.paul.smarttvremote' versionCode='14' versionName='0.6.8'" artifact/APK-BADGING.txt
+          grep -F "uses-permission: name='android.permission.RECORD_AUDIO'" artifact/APK-BADGING.txt
+
+          sha256sum "$exe" "$apk" > "$checksums"
+          cp smart-tv-remote/README.md artifact/README.md
+          cp smart-tv-remote/THIRD_PARTY_NOTICES.md artifact/THIRD_PARTY_NOTICES.md
+          tar \
+            --exclude='./android/.gradle' \
+            --exclude='./android/app/build' \
+            --exclude='./android/app/libs/mobilebridge.aar' \
+            -cJf "artifact/SmartTVRemote-v${APP_VERSION}-source.tar.xz" \
+            -C smart-tv-remote .
+          sha256sum "artifact/SmartTVRemote-v${APP_VERSION}-source.tar.xz" >> "$checksums"
+
+          cd artifact
+          zip -9 "SmartTVRemote-v${APP_VERSION}-Windows-x64.zip" \
+            "SmartTVRemote-v${APP_VERSION}-Windows-x64.exe" \
+            README.md THIRD_PARTY_NOTICES.md \
+            "SmartTVRemote-v${APP_VERSION}-SHA256.txt" WINDOWS-FILE-TYPE.txt
+          zip -9 "SmartTVRemote-v${APP_VERSION}-Android.zip" \
+            "SmartTVRemote-v${APP_VERSION}-debug.apk" \
+            README.md THIRD_PARTY_NOTICES.md \
+            "SmartTVRemote-v${APP_VERSION}-SHA256.txt" \
+            APK-FILE-TYPE.txt APK-SIGNATURE.txt APK-BADGING.txt
+          unzip -t "SmartTVRemote-v${APP_VERSION}-Windows-x64.zip"
+          unzip -t "SmartTVRemote-v${APP_VERSION}-Android.zip"
+
+      - name: Upload final APK, EXE and reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartTVRemote-v0.6.8-final-builds
+          path: artifact/*
+          if-no-files-found: error
+          retention-days: 7

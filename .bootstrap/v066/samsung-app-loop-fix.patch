@@ -1,0 +1,20 @@
+--- a/remoteapp/samsung_apps.go	2026-07-31 21:30:07.335266118 +0000
++++ b/remoteapp/samsung_apps.go	2026-07-31 21:28:19.207269545 +0000
+@@ -418,7 +418,7 @@
+ 	candidates, probedState := c.prioritizeSamsungCandidates(candidates)
+ 	trustedFirstCandidate := probedState || len(apps) > 0
+ 	ids := make([]string, 0, len(candidates))
+-	for index, candidate := range candidates {
++	for _, candidate := range candidates {
+ 		ids = append(ids, candidate.AppID)
+ 	}
+ 	attempts := make([]string, 0, len(candidates)+6)
+@@ -436,7 +436,7 @@
+ 		return LaunchResult{}, false
+ 	}
+ 
+-	for _, candidate := range candidates {
++	for index, candidate := range candidates {
+ 		attempt := fmt.Sprintf("remote %s %s", candidate.AppID, candidate.ActionType)
+ 		attempts = append(attempts, attempt)
+ 		c.log("Samsung: пробую " + attempt + " для " + name + ".")
